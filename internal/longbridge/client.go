@@ -10,8 +10,8 @@ import (
 )
 
 type Client struct {
-	quoteCtx *quote.Context
-	tradeCtx *trade.Context
+	quoteCtx *quote.QuoteContext
+	tradeCtx *trade.TradeContext
 }
 
 func NewClient(appKey, appSecret, accessToken string) (*Client, error) {
@@ -54,52 +54,69 @@ func (c *Client) Close() {
 
 // Quote API
 
+// GetQuote returns real-time quotes
 func (c *Client) GetQuote(ctx context.Context, symbols []string) ([]*quote.Quote, error) {
-	return c.quoteCtx.Quote(ctx, symbols)
+	return c.quoteCtx.RealtimeQuote(ctx, symbols)
 }
 
+// GetQuoteInfo returns static info for securities
 func (c *Client) GetQuoteInfo(ctx context.Context, symbols []string) ([]*quote.StaticInfo, error) {
 	return c.quoteCtx.StaticInfo(ctx, symbols)
 }
 
-func (c *Client) GetDepth(ctx context.Context, symbol string, size int) (*quote.Depth, error) {
-	return c.quoteCtx.Depth(ctx, symbol, size)
+// GetDepth returns depth data
+func (c *Client) GetDepth(ctx context.Context, symbol string) (*quote.SecurityDepth, error) {
+	return c.quoteCtx.RealtimeDepth(ctx, symbol)
 }
 
-func (c *Client) GetTrades(ctx context.Context, symbol string, start int64, end int64, count int) ([]*quote.Trade, error) {
-	return c.quoteCtx.Trades(ctx, symbol, start, end, count)
+// GetTrades returns trade data
+func (c *Client) GetTrades(ctx context.Context, symbol string, count int32) ([]*quote.Trade, error) {
+	return c.quoteCtx.RealtimeTrades(ctx, symbol)
 }
 
-func (c *Client) GetCandlesticks(ctx context.Context, symbol string, period quote.CandlestickPeriod, start int64, end int64, count int) ([]*quote.Candlestick, error) {
-	return c.quoteCtx.Candlesticks(ctx, symbol, period, start, end, count)
+// GetCandlesticks returns candlestick data
+func (c *Client) GetCandlesticks(ctx context.Context, symbol string, period quote.Period, count int32) ([]*quote.Candlestick, error) {
+	return c.quoteCtx.Candlesticks(ctx, symbol, period, count, quote.AdjustType(0))
 }
 
 // Trade API
 
-func (c *Client) SubmitOrder(ctx context.Context, order *trade.SubmitOrderRequest) (string, error) {
+// SubmitOrder submits a trade order
+func (c *Client) SubmitOrder(ctx context.Context, order *trade.SubmitOrder) (string, error) {
 	return c.tradeCtx.SubmitOrder(ctx, order)
 }
 
+// CancelOrder cancels an order
 func (c *Client) CancelOrder(ctx context.Context, orderID string) error {
 	return c.tradeCtx.CancelOrder(ctx, orderID)
 }
 
-func (c *Client) GetOrders(ctx context.Context, status string) ([]*trade.Order, error) {
-	return c.tradeCtx.Orders(ctx, status)
+// GetOrders returns today's orders
+func (c *Client) GetOrders(ctx context.Context) ([]*trade.Order, error) {
+	params := &trade.GetTodayOrders{}
+	return c.tradeCtx.TodayOrders(ctx, params)
 }
 
-func (c *Client) GetOrderDetail(ctx context.Context, orderID string) (*trade.OrderDetail, error) {
+// GetOrderDetail returns order detail
+func (c *Client) GetOrderDetail(ctx context.Context, orderID string) (trade.OrderDetail, error) {
 	return c.tradeCtx.OrderDetail(ctx, orderID)
 }
 
-func (c *Client) GetPositions(ctx context.Context) ([]*trade.Position, error) {
-	return c.tradeCtx.Positions(ctx)
+// GetPositions returns stock positions
+func (c *Client) GetPositions(ctx context.Context) ([]*trade.StockPositionChannel, error) {
+	return c.tradeCtx.StockPositions(ctx, nil)
 }
 
-func (c *Client) GetAccountInfo(ctx context.Context) (*trade.AccountInfo, error) {
-	return c.tradeCtx.AccountInfo(ctx)
+// GetAccountInfo returns account balance
+func (c *Client) GetAccountInfo(ctx context.Context) ([]*trade.AccountBalance, error) {
+	params := &trade.GetAccountBalance{}
+	return c.tradeCtx.AccountBalance(ctx, params)
 }
 
-func (c *Client) GetHistoryExecutions(ctx context.Context, symbol string, start int64, end int64) ([]*trade.Execution, error) {
-	return c.tradeCtx.HistoryExecution(ctx, symbol, start, end)
+// GetHistoryExecutions returns history executions
+func (c *Client) GetHistoryExecutions(ctx context.Context, symbol string) ([]*trade.Execution, error) {
+	params := &trade.GetHistoryExecutions{
+		Symbol: symbol,
+	}
+	return c.tradeCtx.HistoryExecutions(ctx, params)
 }

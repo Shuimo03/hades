@@ -1,6 +1,7 @@
 app_key: ""       # LongBridge App Key
 app_secret: ""   # LongBridge App Secret
 access_token: "" # LongBridge Access Token
+region: "cn"     # Region: cn, us, hk (default: cn)
 
 server:
   host: "0.0.0.0"

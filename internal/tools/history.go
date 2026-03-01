@@ -5,73 +5,76 @@ import (
 	"fmt"
 
 	"github.com/longportapp/openapi-go/quote"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"hades/internal/longbridge"
 )
 
-// CandlesticksInput K线数据
-type CandlesticksInput struct {
-	Symbol string `json:"symbol" jsonschema:"title=symbol,description=股票代码，如: 700.HK"`
-	Period string `json:"period" jsonschema:"title=period,description=K线周期: 1m,5m,15m,30m,1h,2h,4h,1d,1w,1M"`
-	Start  int64  `json:"start" jsonschema:"title=start,description=开始时间戳(毫秒)"`
-	End    int64  `json:"end" jsonschema:"title=end,description=结束时间戳(毫秒)"`
-	Count  int    `json:"count" jsonschema:"title=count,description=返回数量，默认100"`
-}
-
-type CandlesticksOutput struct {
-	Result string `json:"result" jsonschema:"title=result,description=K线数据"`
-}
-
-func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, req *mcp.CallToolRequest, input CandlesticksInput) (*mcp.CallToolResult, CandlesticksOutput, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest, input CandlesticksInput) (*mcp.CallToolResult, CandlesticksOutput, error) {
-		period := parsePeriod(input.Period)
-		if period == 0 {
-			period = quote.CandlestickPeriodDay
+func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+		symbolI, ok := args["symbol"]
+		if !ok {
+			return nil, fmt.Errorf("missing symbol parameter")
+		}
+		symbol, ok := symbolI.(string)
+		if !ok {
+			return nil, fmt.Errorf("symbol must be a string")
 		}
 
-		count := input.Count
-		if count <= 0 {
-			count = 100
+		period := quote.Period(1) // Default to daily
+		if periodI, ok := args["period"]; ok {
+			periodStr, ok := periodI.(string)
+			if ok {
+				period = parsePeriod(periodStr)
+			}
 		}
 
-		candles, err := lb.GetCandlesticks(ctx, input.Symbol, period, input.Start, input.End, count)
+		count := int32(100)
+		if countI, ok := args["count"]; ok {
+			switch v := countI.(type) {
+			case float64:
+				count = int32(v)
+			case int:
+				count = int32(v)
+			}
+		}
+
+		candles, err := lb.GetCandlesticks(ctx, symbol, period, count)
 		if err != nil {
-			return nil, CandlesticksOutput{Result: fmt.Sprintf("Error: %v", err)}, nil
+			return nil, fmt.Errorf("failed to get candlesticks: %v", err)
 		}
 
 		var result string
 		for _, c := range candles {
-			result += fmt.Sprintf("时间: %d, 开盘: %.2f, 最高: %.2f, 最低: %.2f, 收盘: %.2f, 成交量: %d\n",
+			result += fmt.Sprintf("时间: %d, 开盘: %v, 最高: %v, 最低: %v, 收盘: %v, 成交量: %d\n",
 				c.Timestamp, c.Open, c.High, c.Low, c.Close, c.Volume)
 		}
 
-		return nil, CandlesticksOutput{Result: result}, nil
+		return map[string]interface{}{"result": result}, nil
 	}
 }
 
-func parsePeriod(p string) quote.CandlestickPeriod {
+func parsePeriod(p string) quote.Period {
 	switch p {
 	case "1m":
-		return quote.CandlestickPeriodMinute
+		return quote.Period(3) // 1 minute
 	case "5m":
-		return quote.CandlestickPeriod5Minutes
+		return quote.Period(4) // 5 minutes
 	case "15m":
-		return quote.CandlestickPeriod15Minutes
+		return quote.Period(5) // 15 minutes
 	case "30m":
-		return quote.CandlestickPeriod30Minutes
+		return quote.Period(6) // 30 minutes
 	case "1h":
-		return quote.CandlestickPeriodHour
+		return quote.Period(7) // 1 hour
 	case "2h":
-		return quote.CandlestickPeriod2Hours
+		return quote.Period(8) // 2 hours
 	case "4h":
-		return quote.CandlestickPeriod4Hours
+		return quote.Period(9) // 4 hours
 	case "1d", "day":
-		return quote.CandlestickPeriodDay
+		return quote.Period(1) // 1 day
 	case "1w", "week":
-		return quote.CandlestickPeriodWeek
+		return quote.Period(10) // 1 week
 	case "1M", "month":
-		return quote.CandlestickPeriodMonth
+		return quote.Period(11) // 1 month
 	default:
-		return 0
+		return quote.Period(1)
 	}
 }

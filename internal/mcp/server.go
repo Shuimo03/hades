@@ -5,35 +5,39 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+type ToolHandler func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error)
+
 type HTTPServer struct {
-	server   *mcp.Server
-	router   *http.ServeMux
-	handlers map[string]interface{}
+	name    string
+	version string
+	router  *http.ServeMux
+	tools   map[string]ToolHandler
+	schemas map[string]map[string]interface{}
 }
 
 func NewHTTPServer(name, version string) *HTTPServer {
-	server := mcp.NewServer(&mcp.Implementation{Name: name, Version: version}, nil)
 	return &HTTPServer{
-		server:   server,
-		router:   http.NewServeMux(),
-		handlers: make(map[string]interface{}),
+		name:    name,
+		version: version,
+		router:  http.NewServeMux(),
+		tools:   make(map[string]ToolHandler),
+		schemas: make(map[string]map[string]interface{}),
 	}
 }
 
-func (s *HTTPServer) AddTool(tool *mcp.Tool, handler interface{}) {
-	s.handlers[tool.Name] = handler
-	mcp.AddTool(s.server, tool, handler)
+func (s *HTTPServer) AddTool(name, description string, schema map[string]interface{}, handler ToolHandler) {
+	s.tools[name] = handler
+	s.schemas[name] = map[string]interface{}{
+		"name":        name,
+		"description": description,
+		"inputSchema": schema,
+	}
 }
 
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Handle CORS
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -43,7 +47,6 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only accept POST for JSON-RPC
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -51,154 +54,157 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		jsonrpc.WriteError(w, jsonrpc.ErrorCodeParseError, "Failed to read request body")
+		s.writeError(w, -32700, "Failed to read request body")
 		return
 	}
 
-	// Handle MCP protocol messages
-	contentType := r.Header.Get("Content-Type")
-	if contentType == "application/json" || contentType == "" {
-		s.handleJSONRPC(w, r, body)
-	} else {
-		jsonrpc.WriteError(w, jsonrpc.ErrorCodeInvalidRequest, "Unsupported content type")
-	}
+	s.handleJSONRPC(w, body)
 }
 
-func (s *HTTPServer) handleJSONRPC(w http.ResponseWriter, r *http.Request, body []byte) {
-	var req jsonrpc.Request
+func (s *HTTPServer) writeError(w http.ResponseWriter, code int64, message string) {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"error": map[string]interface{}{
+			"code":    code,
+			"message": message,
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *HTTPServer) handleJSONRPC(w http.ResponseWriter, body []byte) {
+	var req struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      interface{}     `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params,omitempty"`
+	}
+
 	if err := json.Unmarshal(body, &req); err != nil {
-		jsonrpc.WriteError(w, jsonrpc.ErrorCodeParseError, err.Error())
+		s.writeError(w, -32700, err.Error())
 		return
 	}
 
-	// Handle initialize request (MCP handshake)
-	if req.Method == "initialize" {
-		s.handleInitialize(w, req)
+	if req.JSONRPC != "2.0" {
+		s.writeError(w, -32600, "Invalid JSON-RPC version")
 		return
 	}
 
-	// Handle tools/list
-	if req.Method == "tools/list" {
-		s.handleToolsList(w, req)
-		return
+	switch req.Method {
+	case "initialize":
+		s.handleInitialize(w, req.ID)
+	case "ping":
+		s.handlePing(w, req.ID)
+	case "tools/list":
+		s.handleToolsList(w, req.ID)
+	case "tools/call":
+		s.handleToolsCall(w, req.ID, req.Params)
+	default:
+		s.writeError(w, -32601, fmt.Sprintf("Method not found: %s", req.Method))
 	}
-
-	// Handle tools/call
-	if req.Method == "tools/call" {
-		s.handleToolsCall(w, r, req)
-		return
-	}
-
-	// Handle ping
-	if req.Method == "ping" {
-		s.handlePing(w, req)
-		return
-	}
-
-	// Unknown method
-	jsonrpc.WriteError(w, jsonrpc.ErrorCodeMethodNotFound, fmt.Sprintf("Method not found: %s", req.Method))
 }
 
-func (s *HTTPServer) handleInitialize(w http.ResponseWriter, req jsonrpc.Request) {
+func (s *HTTPServer) handleInitialize(w http.ResponseWriter, id interface{}) {
 	result := map[string]interface{}{
 		"protocolVersion": "2024-11-05",
 		"capabilities": map[string]interface{}{
 			"tools": map[string]interface{}{},
 		},
 		"serverInfo": map[string]interface{}{
-			"name":    s.server.Implementation.Name,
-			"version": s.server.Implementation.Version,
+			"name":    s.name,
+			"version": s.version,
 		},
 	}
 
-	resp := jsonrpc.Response{
-		ID:     req.ID,
-		Result: result,
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *HTTPServer) handleToolsList(w http.ResponseWriter, req jsonrpc.Request) {
-	// Get registered tools from server
-	tools := s.server.Tools()
+func (s *HTTPServer) handlePing(w http.ResponseWriter, id interface{}) {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  nil,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *HTTPServer) handleToolsList(w http.ResponseWriter, id interface{}) {
+	tools := make([]map[string]interface{}, 0, len(s.tools))
+	for _, schema := range s.schemas {
+		tools = append(tools, schema)
+	}
 
 	result := map[string]interface{}{
 		"tools": tools,
 	}
 
-	resp := jsonrpc.Response{
-		ID:     req.ID,
-		Result: result,
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *HTTPServer) handleToolsCall(w http.ResponseWriter, r *http.Request, req jsonrpc.Request) {
-	// Parse request params
-	var params struct {
+func (s *HTTPServer) handleToolsCall(w http.ResponseWriter, id interface{}, params json.RawMessage) {
+	var paramsStruct struct {
 		Name      string                 `json:"name"`
-		Arguments map[string]interface{} `json:"arguments"`
+		Arguments map[string]interface{} `json:"arguments,omitempty"`
 	}
 
-	if req.Params != nil {
-		if data, ok := req.Params.(map[string]interface{}); ok {
-			params.Name, _ = data["name"].(string)
-			params.Arguments, _ = data["arguments"].(map[string]interface{})
-		}
-	}
-
-	if params.Name == "" {
-		jsonrpc.WriteError(w, jsonrpc.ErrorCodeInvalidParams, "Missing tool name")
+	if err := json.Unmarshal(params, &paramsStruct); err != nil {
+		s.writeError(w, -32600, err.Error())
 		return
 	}
 
-	// Find handler
-	handler, ok := s.handlers[params.Name]
+	if paramsStruct.Name == "" {
+		s.writeError(w, -32600, "Missing tool name")
+		return
+	}
+
+	handler, ok := s.tools[paramsStruct.Name]
 	if !ok {
-		jsonrpc.WriteError(w, jsonrpc.ErrorCodeMethodNotFound, fmt.Sprintf("Tool not found: %s", params.Name))
+		s.writeError(w, -32601, fmt.Sprintf("Tool not found: %s", paramsStruct.Name))
 		return
 	}
 
-	// Execute tool via MCP server
+	// Execute tool
 	ctx := context.Background()
-	callReq := &mcp.CallToolRequest{
-		Params: &mcp.CallToolParams{
-			Name:      params.Name,
-			Arguments: params.Arguments,
+	result, err := handler(ctx, paramsStruct.Arguments)
+	if err != nil {
+		s.writeError(w, -32603, err.Error())
+		return
+	}
+
+	// Format result as MCP tool response
+	content := make([]map[string]interface{}, 0)
+	if result != nil {
+		content = append(content, map[string]interface{}{
+			"type": "text",
+			"text": fmt.Sprintf("%v", result),
+		})
+	}
+
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result": map[string]interface{}{
+			"content": content,
 		},
 	}
 
-	result, err := s.server.CallTool(ctx, callReq, handler)
-	if err != nil {
-		jsonrpc.WriteError(w, jsonrpc.ErrorCodeInternalError, err.Error())
-		return
-	}
-
-	resp := jsonrpc.Response{
-		ID:     req.ID,
-		Result: result,
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-}
-
-func (s *HTTPServer) handlePing(w http.ResponseWriter, req jsonrpc.Request) {
-	resp := jsonrpc.Response{
-		ID:     req.ID,
-		Result: nil,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (s *HTTPServer) Run(ctx context.Context, host string, port int) error {
-	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("MCP server starting on %s", addr)
-	return http.ListenAndServe(addr, s.router)
 }

@@ -12,6 +12,7 @@ type Config struct {
 	AccessToken string `yaml:"access_token"`
 	ServerHost  string `yaml:"host"`
 	ServerPort  int    `yaml:"port"`
+	Region      string `yaml:"region"`
 }
 
 func Load(path string) (*Config, error) {
@@ -34,6 +35,20 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.AccessToken == "" {
 		cfg.AccessToken = os.Getenv("LONGPORT_ACCESS_TOKEN")
+	}
+
+	// Set environment variables for LongBridge SDK
+	if cfg.AppKey != "" {
+		os.Setenv("LONGPORT_APP_KEY", cfg.AppKey)
+	}
+	if cfg.AppSecret != "" {
+		os.Setenv("LONGPORT_APP_SECRET", cfg.AppSecret)
+	}
+	if cfg.AccessToken != "" {
+		os.Setenv("LONGPORT_ACCESS_TOKEN", cfg.AccessToken)
+	}
+	if cfg.Region != "" {
+		os.Setenv("LONGPORT_REGION", cfg.Region)
 	}
 
 	// Set defaults
