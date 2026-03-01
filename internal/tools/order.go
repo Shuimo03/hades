@@ -110,8 +110,7 @@ func NewOrdersTool(lb *longbridge.Client) func(ctx context.Context, args map[str
 		if err != nil {
 			return nil, fmt.Errorf("failed to get orders: %v", err)
 		}
-
-		if len(orders) == 0 {
+		if orders == nil || len(orders) == 0 {
 			return map[string]interface{}{"result": "暂无订单"}, nil
 		}
 
@@ -159,8 +158,7 @@ func NewHistoryExecutionsTool(lb *longbridge.Client) func(ctx context.Context, a
 		if err != nil {
 			return nil, fmt.Errorf("failed to get history executions: %v", err)
 		}
-
-		if len(executions) == 0 {
+		if executions == nil || len(executions) == 0 {
 			return map[string]interface{}{"result": "暂无成交记录"}, nil
 		}
 

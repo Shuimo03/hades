@@ -3,8 +3,10 @@ module hades
 go 1.25.3
 
 require (
+	github.com/larksuite/oapi-sdk-go v1.9.11
 	github.com/longportapp/openapi-go v0.17.1
 	github.com/modelcontextprotocol/go-sdk v1.4.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/shopspring/decimal v1.3.1
 	gopkg.in/yaml.v3 v3.0.1
 )

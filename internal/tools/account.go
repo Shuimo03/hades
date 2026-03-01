@@ -14,6 +14,9 @@ func NewAccountInfoTool(lb *longbridge.Client) func(ctx context.Context, args ma
 		if err != nil {
 			return nil, fmt.Errorf("failed to get account info: %v", err)
 		}
+		if len(balances) == 0 {
+			return map[string]interface{}{"result": "未获取到账户信息"}, nil
+		}
 
 		var result string
 		for _, b := range balances {
@@ -44,6 +47,9 @@ func NewPositionsTool(lb *longbridge.Client) func(ctx context.Context, args map[
 		positionChannels, err := lb.GetPositions(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get positions: %v", err)
+		}
+		if len(positionChannels) == 0 {
+			return map[string]interface{}{"result": "当前无持仓"}, nil
 		}
 
 		var allPositions []*trade.StockPosition

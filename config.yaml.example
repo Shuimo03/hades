@@ -6,3 +6,28 @@ region: "cn"     # Region: cn, us, hk (default: cn)
 server:
   host: "0.0.0.0"
   port: 8080
+
+# Daily Brief Configuration
+daily_brief:
+  enabled: true
+  timezone: "Asia/Shanghai"
+  pre_market_time: "09:00"    # 开盘前报告时间
+  post_market_time: "16:00"   # 收盘后报告时间
+  webhook_url: ""             # Slack/钉钉 Webhook
+
+# Signal Alert Configuration
+signal_alert:
+  enabled: true
+  check_interval: 60          # 检查间隔（秒）
+  webhook_url: ""             # Slack/钉钉 Webhook
+
+# Execution Window Configuration
+execution_window:
+  enabled: true
+
+# Feishu Configuration (飞书机器人通知)
+feishu:
+  enabled: false
+  app_id: ""       # 飞书应用 App ID
+  app_secret: ""   # 飞书应用 App Secret
+  user_id: ""      # 接收消息的用户 open_id

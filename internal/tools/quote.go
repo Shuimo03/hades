@@ -23,9 +23,15 @@ func NewQuoteTool(lb *longbridge.Client) func(ctx context.Context, args map[stri
 		if err != nil {
 			return nil, fmt.Errorf("failed to get quote: %v", err)
 		}
+		if quotes == nil || len(quotes) == 0 {
+			return map[string]interface{}{"result": "未获取到行情数据"}, nil
+		}
 
 		var result string
 		for _, q := range quotes {
+			if q == nil {
+				continue
+			}
 			result += fmt.Sprintf("%s: 最新价=%s, 开盘=%s, 最高=%s, 最低=%s, 成交量=%d\n",
 				q.Symbol, q.LastDone, q.Open, q.High, q.Low, q.Volume)
 		}
@@ -49,6 +55,9 @@ func NewQuoteInfoTool(lb *longbridge.Client) func(ctx context.Context, args map[
 		infos, err := lb.GetQuoteInfo(ctx, symbols)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get quote info: %v", err)
+		}
+		if len(infos) == 0 {
+			return map[string]interface{}{"result": "未获取到股票信息"}, nil
 		}
 
 		var result string
@@ -75,6 +84,9 @@ func NewDepthTool(lb *longbridge.Client) func(ctx context.Context, args map[stri
 		depth, err := lb.GetDepth(ctx, symbol)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get depth: %v", err)
+		}
+		if depth == nil {
+			return map[string]interface{}{"result": "未获取到深度数据"}, nil
 		}
 
 		result := fmt.Sprintf("%s 买卖盘口:\n", symbol)
@@ -106,6 +118,9 @@ func NewTradesTool(lb *longbridge.Client) func(ctx context.Context, args map[str
 		trades, err := lb.GetTrades(ctx, symbol, 100)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get trades: %v", err)
+		}
+		if len(trades) == 0 {
+			return map[string]interface{}{"result": "未获取到成交数据"}, nil
 		}
 
 		var result string

@@ -41,6 +41,9 @@ func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args m
 		if err != nil {
 			return nil, fmt.Errorf("failed to get candlesticks: %v", err)
 		}
+		if len(candles) == 0 {
+			return map[string]interface{}{"result": "未获取到K线数据"}, nil
+		}
 
 		var result string
 		for _, c := range candles {

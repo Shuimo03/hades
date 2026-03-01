@@ -9,10 +9,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"hades/internal/alerts"
+	"hades/internal/brief"
 	"hades/internal/config"
 	"hades/internal/longbridge"
 	"hades/internal/mcp"
+	"hades/internal/scheduler"
 	"hades/internal/tools"
 )
 
@@ -37,6 +41,96 @@ func main() {
 		log.Fatalf("Failed to create LongBridge client: %v", err)
 	}
 	defer lb.Close()
+
+	// Create scheduler
+	sched := scheduler.New()
+
+	// Create alert manager
+	alertMgr := alerts.New(lb, "data/alerts.json", time.Duration(cfg.SignalAlert.CheckInterval)*time.Second)
+	if err := alertMgr.Load(); err != nil {
+		log.Printf("[Alerts] Failed to load alerts: %v", err)
+	}
+
+	// Create notifier (Feishu or Webhook)
+	var notifier alerts.Notifier
+	if cfg.Feishu != nil && cfg.Feishu.Enabled && cfg.Feishu.AppID != "" && cfg.Feishu.AppSecret != "" {
+		notifier = alerts.NewFeishuNotifierWithConfig(cfg.Feishu.AppID, cfg.Feishu.AppSecret, cfg.Feishu.UserID)
+		log.Printf("[Notifier] Using Feishu notifier")
+	} else {
+		notifier = alerts.NewNotifier(cfg.SignalAlert.WebhookURL)
+		log.Printf("[Notifier] Using Webhook notifier")
+	}
+
+	// Set alert callback
+	alertMgr.SetCallback(func(alert *alerts.Alert, message string) {
+		log.Printf("[Alerts] Triggered: %s", message)
+		notifier.Notify(context.Background(), fmt.Sprintf("Signal Alert: %s", alert.Symbol), message)
+	})
+
+	// Create execution window manager
+	execWindowMgr := alerts.NewExecutionWindowManager("data/execution_windows.json")
+	if err := execWindowMgr.Load(); err != nil {
+		log.Printf("[ExecutionWindow] Failed to load windows: %v", err)
+	}
+
+	// Set execution window callback
+	execWindowMgr.SetCallback(func(window *alerts.ExecutionWindow) {
+		log.Printf("[ExecutionWindow] Triggered: %s", window.Name)
+		// Generate brief for execution window
+		gen := brief.New(lb, cfg.DailyBrief.Timezone)
+		result, err := gen.Generate(context.Background(), brief.BriefVersionPreMarket, nil)
+		if err != nil {
+			log.Printf("[ExecutionWindow] Failed to generate brief: %v", err)
+			return
+		}
+		message := fmt.Sprintf("⏰ Execution Window: %s\n\n%s", window.Name, result)
+		notifier.Notify(context.Background(), "Execution Window", message)
+	})
+
+	// Setup Daily Brief jobs
+	if cfg.DailyBrief.Enabled {
+		timezone := cfg.DailyBrief.Timezone
+		if timezone == "" {
+			timezone = "Asia/Shanghai"
+		}
+		gen := brief.New(lb, timezone)
+
+		// Pre-market brief
+		preTime := cfg.DailyBrief.PreMarketTime
+		if preTime != "" {
+			sched.AddJob("daily_brief_pre_market", fmt.Sprintf("0 %s * * 1-5", preTime), func(ctx context.Context) {
+				result, err := gen.Generate(ctx, brief.BriefVersionPreMarket, nil)
+				if err != nil {
+					log.Printf("[DailyBrief] Pre-market failed: %v", err)
+					return
+				}
+				notifier.Notify(ctx, "Daily Brief - 开盘前", result)
+			})
+		}
+
+		// Post-market brief
+		postTime := cfg.DailyBrief.PostMarketTime
+		if postTime != "" {
+			sched.AddJob("daily_brief_post_market", fmt.Sprintf("0 %s * * 1-5", postTime), func(ctx context.Context) {
+				result, err := gen.Generate(ctx, brief.BriefVersionPostMarket, nil)
+				if err != nil {
+					log.Printf("[DailyBrief] Post-market failed: %v", err)
+					return
+				}
+				notifier.Notify(ctx, "Daily Brief - 收盘后", result)
+			})
+		}
+	}
+
+	// Setup signal alert checker
+	if cfg.SignalAlert.Enabled {
+		sched.AddJob("signal_alert_check", fmt.Sprintf("@every %ds", cfg.SignalAlert.CheckInterval), func(ctx context.Context) {
+			alertMgr.CheckAll(ctx)
+		})
+	}
+
+	// Start scheduler
+	sched.Start()
 
 	// Create MCP HTTP server
 	server := mcp.NewHTTPServer("longbridge-mcp", "v1.0.0")
@@ -215,6 +309,115 @@ func main() {
 		},
 	}, tools.NewHistoryExecutionsTool(lb))
 
+	// Register Daily Brief tools
+	server.AddTool("get_daily_brief", "获取每日交易简报", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"version": map[string]interface{}{
+				"type":        "string",
+				"description": "报告版本: pre_market (开盘前), post_market (收盘后)",
+			},
+			"symbols": map[string]interface{}{
+				"type":        "string",
+				"description": "关注的股票代码，用逗号分隔",
+			},
+		},
+	}, tools.NewDailyBriefTool(lb, cfg.DailyBrief.Timezone))
+
+	// Register Signal Alert tools
+	server.AddTool("create_signal_alert", "创建信号提醒", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"symbol": map[string]interface{}{
+				"type":        "string",
+				"description": "股票代码，如: 700.HK",
+			},
+			"alert_type": map[string]interface{}{
+				"type":        "string",
+				"description": "提醒类型: price, volatility, volume",
+			},
+			"condition": map[string]interface{}{
+				"type":        "string",
+				"description": "触发条件: above, below, cross_up, cross_down",
+			},
+			"threshold": map[string]interface{}{
+				"type":        "number",
+				"description": "触发阈值",
+			},
+			"note": map[string]interface{}{
+				"type":        "string",
+				"description": "备注",
+			},
+		},
+	}, tools.NewCreateSignalAlertTool(lb, alertMgr))
+
+	server.AddTool("list_signal_alerts", "查询信号提醒列表", map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}, tools.NewListSignalAlertsTool(alertMgr))
+
+	server.AddTool("delete_signal_alert", "删除信号提醒", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"alert_id": map[string]interface{}{
+				"type":        "string",
+				"description": "提醒ID",
+			},
+		},
+	}, tools.NewDeleteSignalAlertTool(alertMgr))
+
+	server.AddTool("enable_signal_alert", "启用/禁用信号提醒", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"alert_id": map[string]interface{}{
+				"type":        "string",
+				"description": "提醒ID",
+			},
+			"enabled": map[string]interface{}{
+				"type":        "boolean",
+				"description": "是否启用",
+			},
+		},
+	}, tools.NewEnableSignalAlertTool(alertMgr))
+
+	// Register Execution Window tools
+	server.AddTool("create_execution_window", "创建执行窗口", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"name": map[string]interface{}{
+				"type":        "string",
+				"description": "窗口名称",
+			},
+			"schedule": map[string]interface{}{
+				"type":        "string",
+				"description": "Cron 表达式，如: 0 9 * * 1-5",
+			},
+			"strategy": map[string]interface{}{
+				"type":        "string",
+				"description": "策略描述",
+			},
+			"webhook_url": map[string]interface{}{
+				"type":        "string",
+				"description": "Webhook URL (可选)",
+			},
+		},
+	}, tools.NewCreateExecutionWindowTool(execWindowMgr))
+
+	server.AddTool("list_execution_windows", "查询执行窗口列表", map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}, tools.NewListExecutionWindowsTool(execWindowMgr))
+
+	server.AddTool("delete_execution_window", "删除执行窗口", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"window_id": map[string]interface{}{
+				"type":        "string",
+				"description": "窗口ID",
+			},
+		},
+	}, tools.NewDeleteExecutionWindowTool(execWindowMgr))
+
 	// Setup HTTP handler
 	http.Handle("/mcp/", server)
 
@@ -222,10 +425,6 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.ServerPort)
 	log.Printf("MCP server starting on %s", addr)
 	log.Printf("MCP endpoint: http://%s/mcp/", addr)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_ = ctx
 
 	go func() {
 		if err := http.ListenAndServe(addr, nil); err != nil {
@@ -239,5 +438,5 @@ func main() {
 	<-sigCh
 
 	log.Println("Shutting down...")
-	cancel()
+	sched.Stop()
 }
