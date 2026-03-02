@@ -22,12 +22,20 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
+	logLevel := flag.String("logs", "info", "log level: debug, info, warn, error")
 	flag.Parse()
 
 	// Load config
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Set debug mode
+	if *logLevel == "debug" {
+		mcp.SetDebug(true)
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
+		log.Println("[DEBUG] Debug mode enabled")
 	}
 
 	// Validate config
@@ -51,14 +59,17 @@ func main() {
 		log.Printf("[Alerts] Failed to load alerts: %v", err)
 	}
 
-	// Create notifier (Feishu or Webhook)
+	// Create notifier (Feishu API > Webhook)
 	var notifier alerts.Notifier
-	if cfg.Feishu != nil && cfg.Feishu.Enabled && cfg.Feishu.AppID != "" && cfg.Feishu.AppSecret != "" {
+	if cfg.Feishu != nil && cfg.Feishu.Enabled && cfg.Feishu.AppID != "" && cfg.Feishu.AppSecret != "" && cfg.Feishu.UserID != "" {
 		notifier = alerts.NewFeishuNotifierWithConfig(cfg.Feishu.AppID, cfg.Feishu.AppSecret, cfg.Feishu.UserID)
-		log.Printf("[Notifier] Using Feishu notifier")
-	} else {
+		log.Printf("[Notifier] Using Feishu API (app_id: %s, user_id: %s)", cfg.Feishu.AppID, cfg.Feishu.UserID)
+	} else if cfg.SignalAlert != nil && cfg.SignalAlert.WebhookURL != "" {
 		notifier = alerts.NewNotifier(cfg.SignalAlert.WebhookURL)
-		log.Printf("[Notifier] Using Webhook notifier")
+		log.Printf("[Notifier] Using webhook: %s", cfg.SignalAlert.WebhookURL)
+	} else {
+		notifier = alerts.NewNotifier("")
+		log.Printf("[Notifier] No notification configured")
 	}
 
 	// Set alert callback
@@ -83,7 +94,7 @@ func main() {
 			log.Printf("[ExecutionWindow] Failed to generate brief: %v", err)
 			return
 		}
-		message := fmt.Sprintf("⏰ Execution Window: %s\n\n%s", window.Name, result)
+		message := fmt.Sprintf("Execution Window: %s\n\n%s", window.Name, result)
 		notifier.Notify(context.Background(), "Execution Window", message)
 	})
 

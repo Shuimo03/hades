@@ -27,42 +27,42 @@ const (
 type AlertCondition string
 
 const (
-	AlertConditionAbove    AlertCondition = "above"    // 价格高于
-	AlertConditionBelow    AlertCondition = "below"   // 价格低于
-	AlertConditionCrossUp  AlertCondition = "cross_up" // 上穿
+	AlertConditionAbove     AlertCondition = "above"      // 价格高于
+	AlertConditionBelow     AlertCondition = "below"      // 价格低于
+	AlertConditionCrossUp   AlertCondition = "cross_up"   // 上穿
 	AlertConditionCrossDown AlertCondition = "cross_down" // 下穿
 )
 
 // Alert represents a signal alert
 type Alert struct {
-	ID         string       `json:"id"`
-	Symbol     string       `json:"symbol"`
-	AlertType  AlertType    `json:"alert_type"`
-	Condition  AlertCondition `json:"condition"`
-	Threshold  float64     `json:"threshold"`
-	Note       string      `json:"note,omitempty"`
-	Enabled    bool        `json:"enabled"`
-	CreatedAt time.Time   `json:"created_at"`
-	LastCheck  time.Time   `json:"last_check,omitempty"`
-	Triggered  bool        `json:"triggered,omitempty"`
-	TriggeredAt time.Time `json:"triggered_at,omitempty"`
+	ID          string         `json:"id"`
+	Symbol      string         `json:"symbol"`
+	AlertType   AlertType      `json:"alert_type"`
+	Condition   AlertCondition `json:"condition"`
+	Threshold   float64        `json:"threshold"`
+	Note        string         `json:"note,omitempty"`
+	Enabled     bool           `json:"enabled"`
+	CreatedAt   time.Time      `json:"created_at"`
+	LastCheck   time.Time      `json:"last_check,omitempty"`
+	Triggered   bool           `json:"triggered,omitempty"`
+	TriggeredAt time.Time      `json:"triggered_at,omitempty"`
 }
 
 // Manager manages signal alerts
 type Manager struct {
-	mu          sync.RWMutex
-	alerts      map[string]*Alert
-	lb          *longbridge.Client
+	mu            sync.RWMutex
+	alerts        map[string]*Alert
+	lb            *longbridge.Client
 	checkInterval time.Duration
-	storagePath string
-	callback    func(alert *Alert, message string) // callback when alert triggers
+	storagePath   string
+	callback      func(alert *Alert, message string) // callback when alert triggers
 }
 
 // New creates a new alert manager
 func New(lb *longbridge.Client, storagePath string, checkInterval time.Duration) *Manager {
 	return &Manager{
 		alerts:        make(map[string]*Alert),
-		lb:           lb,
+		lb:            lb,
 		checkInterval: checkInterval,
 		storagePath:   storagePath,
 	}
@@ -161,8 +161,8 @@ func (m *Manager) List() []*Alert {
 	defer m.mu.RUnlock()
 
 	alerts := make([]*Alert, 0, len(m.alerts))
-	for _, a := range		alerts = append(alerts, a)
- m.alerts {
+	for _, a := range m.alerts {
+		alerts = append(alerts, a)
 	}
 	return alerts
 }
@@ -306,11 +306,11 @@ func (m *Manager) checkPriceAlert(alert *Alert, quote interface{}) string {
 	switch alert.Condition {
 	case AlertConditionAbove:
 		if price > alert.Threshold {
-			return fmt.Sprintf("🔔 %s 达到 %.2f (当前: %.2f)", alert.Symbol, alert.Threshold, price)
+			return fmt.Sprintf("[价格提醒] %s 达到 %.2f (当前: %.2f)", alert.Symbol, alert.Threshold, price)
 		}
 	case AlertConditionBelow:
 		if price < alert.Threshold {
-			return fmt.Sprintf("🔔 %s 跌破 %.2f (当前: %.2f)", alert.Symbol, alert.Threshold, price)
+			return fmt.Sprintf("[价格提醒] %s 跌破 %.2f (当前: %.2f)", alert.Symbol, alert.Threshold, price)
 		}
 	}
 
@@ -352,7 +352,7 @@ func (m *Manager) checkVolatilityAlert(alert *Alert, quote interface{}) string {
 	volatility := (high - low) / open * 100
 
 	if volatility > alert.Threshold {
-		return fmt.Sprintf("⚡ %s 波动率飙升 %.1f%% (最高: %.2f, 最低: %.2f)",
+		return fmt.Sprintf("[波动率提醒] %s 波动率 %.1f%% (最高: %.2f, 最低: %.2f)",
 			alert.Symbol, volatility, high, low)
 	}
 
@@ -372,7 +372,7 @@ func (m *Manager) checkVolumeAlert(alert *Alert, quote interface{}) string {
 
 	// For volume alert, we need to compare with average
 	// This is a simplified version - in production, you'd want historical average
-	volume := q.GetVolume()
+	_ = q.GetVolume()
 
 	// Threshold represents multiplier (e.g., 2.0 means 2x average)
 	// This would need historical data in production

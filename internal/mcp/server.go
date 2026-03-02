@@ -5,8 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 )
+
+// DebugMode controls debug logging
+var DebugMode = false
+
+func SetDebug(enabled bool) {
+	DebugMode = enabled
+}
 
 type ToolHandler func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error)
 
@@ -56,6 +64,10 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeError(w, -32700, "Failed to read request body")
 		return
+	}
+
+	if DebugMode {
+		log.Printf("[DEBUG] Request: %s", string(body))
 	}
 
 	s.handleJSONRPC(w, body)
@@ -203,6 +215,12 @@ func (s *HTTPServer) handleToolsCall(w http.ResponseWriter, id interface{}, para
 		"result": map[string]interface{}{
 			"content": content,
 		},
+	}
+
+	// Debug logging for response
+	if DebugMode {
+		respBytes, _ := json.Marshal(resp)
+		log.Printf("[DEBUG] Response: %s", string(respBytes))
 	}
 
 	w.Header().Set("Content-Type", "application/json")

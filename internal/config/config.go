@@ -25,6 +25,9 @@ type Config struct {
 
 	// Feishu Configuration
 	Feishu *FeishuConfig `yaml:"feishu"`
+
+	// Log Configuration
+	Log *LogConfig `yaml:"log"`
 }
 
 type DailyBriefConfig struct {
@@ -43,6 +46,11 @@ type SignalAlertConfig struct {
 
 type ExecutionWindowConfig struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// LogConfig holds logging configuration
+type LogConfig struct {
+	Level string `yaml:"level"` // debug, info, warn, error
 }
 
 // FeishuConfig holds Feishu notification configuration
@@ -126,6 +134,13 @@ func Load(path string) (*Config, error) {
 	if cfg.Feishu == nil {
 		cfg.Feishu = &FeishuConfig{
 			Enabled: false,
+		}
+	}
+
+	// Set Log defaults
+	if cfg.Log == nil {
+		cfg.Log = &LogConfig{
+			Level: "info",
 		}
 	}
 

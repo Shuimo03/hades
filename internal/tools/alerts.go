@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"hades/internal/alerts"
 	"hades/internal/longbridge"
@@ -52,7 +51,7 @@ func NewCreateSignalAlertTool(lb *longbridge.Client, mgr *alerts.Manager) func(c
 		}
 
 		return map[string]interface{}{
-			"result": fmt.Sprintf("✅ 提醒创建成功: %s %s %s %.2f",
+			"result": fmt.Sprintf("提醒创建成功: %s %s %s %.2f",
 				alert.Symbol, alert.Condition, alert.AlertType, alert.Threshold),
 		}, nil
 	}
@@ -68,15 +67,15 @@ func NewListSignalAlertsTool(mgr *alerts.Manager) func(ctx context.Context, args
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("📊 信号提醒 (%d 个):\n\n", len(alertList)))
+		sb.WriteString(fmt.Sprintf("信号提醒 (%d 个):\n\n", len(alertList)))
 
 		for _, a := range alertList {
-			status := "✅"
+			status := "[OK]"
 			if !a.Enabled {
-				status = "❌"
+				status = "[OFF]"
 			}
 			if a.Triggered {
-				status = "🔔"
+				status = "[TRIGGERED]"
 			}
 
 			sb.WriteString(fmt.Sprintf("%s %s | %s | %s | %.2f\n",
@@ -102,7 +101,7 @@ func NewDeleteSignalAlertTool(mgr *alerts.Manager) func(ctx context.Context, arg
 			return nil, fmt.Errorf("alert not found: %s", alertID)
 		}
 
-		return map[string]interface{}{"result": fmt.Sprintf("✅ 已删除提醒: %s", alertID)}, nil
+		return map[string]interface{}{"result": fmt.Sprintf("已删除提醒: %s", alertID)}, nil
 	}
 }
 
@@ -128,7 +127,7 @@ func NewEnableSignalAlertTool(mgr *alerts.Manager) func(ctx context.Context, arg
 			status = "禁用"
 		}
 
-		return map[string]interface{}{"result": fmt.Sprintf("✅ 提醒已%s: %s", status, alertID)}, nil
+		return map[string]interface{}{"result": fmt.Sprintf("提醒已%s: %s", status, alertID)}, nil
 	}
 }
 
@@ -136,7 +135,7 @@ func NewEnableSignalAlertTool(mgr *alerts.Manager) func(ctx context.Context, arg
 func NewCheckAlertsTool(lb *longbridge.Client, mgr *alerts.Manager) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 		mgr.CheckAll(ctx)
-		return map[string]interface{}{"result": "✅ 触发检查完成"}, nil
+		return map[string]interface{}{"result": "触发检查完成"}, nil
 	}
 }
 
@@ -176,7 +175,7 @@ func NewCreateExecutionWindowTool(mgr *alerts.ExecutionWindowManager) func(ctx c
 		}
 
 		return map[string]interface{}{
-			"result": fmt.Sprintf("✅ 执行窗口创建成功: %s\n时间: %s\n策略: %s",
+			"result": fmt.Sprintf("执行窗口创建成功: %s\n时间: %s\n策略: %s",
 				window.Name, window.Schedule, window.Strategy),
 		}, nil
 	}
@@ -192,12 +191,12 @@ func NewListExecutionWindowsTool(mgr *alerts.ExecutionWindowManager) func(ctx co
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("⏰ 执行窗口 (%d 个):\n\n", len(windows)))
+		sb.WriteString(fmt.Sprintf("执行窗口 (%d 个):\n\n", len(windows)))
 
 		for _, w := range windows {
-			status := "✅"
+			status := "[OK]"
 			if !w.Enabled {
-				status = "❌"
+				status = "[OFF]"
 			}
 
 			sb.WriteString(fmt.Sprintf("%s %s\n", status, w.Name))
@@ -225,6 +224,6 @@ func NewDeleteExecutionWindowTool(mgr *alerts.ExecutionWindowManager) func(ctx c
 			return nil, fmt.Errorf("window not found: %s", windowID)
 		}
 
-		return map[string]interface{}{"result": fmt.Sprintf("✅ 已删除执行窗口: %s", windowID)}, nil
+		return map[string]interface{}{"result": fmt.Sprintf("已删除执行窗口: %s", windowID)}, nil
 	}
 }

@@ -130,6 +130,6 @@ func (s *Scheduler) GetNextRun(name string) time.Time {
 
 // ValidateCronExpr validates a cron expression
 func ValidateCronExpr(expr string) error {
-	_, err := cron.Parse(expr)
+	_, err := cron.ParseStandard(expr)
 	return err
 }

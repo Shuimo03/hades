@@ -47,7 +47,7 @@ func (g *BriefGenerator) Generate(ctx context.Context, version BriefVersion, sym
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📊 Daily Brief - %s %s\n\n", getVersionName(version), now.Format("2006-01-02 15:04")))
+	sb.WriteString(fmt.Sprintf("Daily Brief - %s %s\n\n", getVersionName(version), now.Format("2006-01-02 15:04")))
 
 	// 1. 宏观概览
 	sb.WriteString("=== 宏观概览 ===\n")
@@ -117,17 +117,17 @@ func (g *BriefGenerator) getMacroOverview(ctx context.Context, t time.Time, vers
 
 	// Time-based macro info
 	if version == BriefVersionPreMarket {
-		sb.WriteString(fmt.Sprintf("📅 日期: %s\n", t.Format("2006-01-02")))
-		sb.WriteString("🕐 市场状态: 盘前\n")
+		sb.WriteString(fmt.Sprintf("日期: %s\n", t.Format("2006-01-02")))
+		sb.WriteString("市场状态: 盘前\n")
 
 		// Check if it's Monday (pre-market)
 		if t.Weekday() == time.Monday {
-			sb.WriteString("📌 提示: 本周首个交易日\n")
+			sb.WriteString("提示: 本周首个交易日\n")
 		}
 	} else {
-		sb.WriteString(fmt.Sprintf("📅 日期: %s\n", t.Format("2006-01-02")))
-		sb.WriteString("🕐 市场状态: 盘后\n")
-		sb.WriteString(fmt.Sprintf("📈 今日涨跌: 待更新\n"))
+		sb.WriteString(fmt.Sprintf("日期: %s\n", t.Format("2006-01-02")))
+		sb.WriteString("市场状态: 盘后\n")
+		sb.WriteString(fmt.Sprintf("今日涨跌: 待更新\n"))
 	}
 
 	return sb.String(), nil
@@ -145,8 +145,8 @@ func (g *BriefGenerator) getPositionsOverview(ctx context.Context, symbols []str
 
 	if len(balances) > 0 {
 		b := balances[0]
-		sb.WriteString(fmt.Sprintf("💰 总现金: %s %s\n", b.Currency, b.TotalCash.String()))
-		sb.WriteString(fmt.Sprintf("📊 净资产: %s %s\n", b.Currency, b.NetAssets.String()))
+		sb.WriteString(fmt.Sprintf("总现金: %s %s\n", b.Currency, b.TotalCash.String()))
+		sb.WriteString(fmt.Sprintf("净资产: %s %s\n", b.Currency, b.NetAssets.String()))
 	}
 
 	// Get positions
@@ -156,21 +156,20 @@ func (g *BriefGenerator) getPositionsOverview(ctx context.Context, symbols []str
 	}
 
 	if len(positions) == 0 {
-		sb.WriteString("\n📋 当前无持仓\n")
+		sb.WriteString("\n当前无持仓\n")
 		return sb.String(), nil
 	}
 
-	sb.WriteString(fmt.Sprintf("\n📋 持仓 (%d 只):\n", len(positions)))
-	sb.WriteString(fmt.Sprintf("%-12s %-10s %-10s %-10s\n", "股票", "数量", "成本价", "盈亏"))
-	sb.WriteString(strings.Repeat("-", 50) + "\n")
+	sb.WriteString(fmt.Sprintf("\n持仓 (%d 只):\n", len(positions)))
+	sb.WriteString(fmt.Sprintf("%-12s %-10s %-10s\n", "股票", "数量", "成本价"))
+	sb.WriteString(strings.Repeat("-", 40) + "\n")
 
 	for _, ch := range positions {
 		for _, p := range ch.Positions {
-			sb.WriteString(fmt.Sprintf("%-12s %-10s %-10s %-10s\n",
+			sb.WriteString(fmt.Sprintf("%-12s %-10s %-10s\n",
 				p.Symbol,
-				p.Quantity.String(),
-				p.CostPrice.String(),
-				p.UnrealizedPL.String()))
+				p.Quantity,
+				p.CostPrice))
 		}
 	}
 
@@ -188,62 +187,24 @@ func (g *BriefGenerator) getRiskWarnings(ctx context.Context, symbols []string, 
 	}
 
 	if len(positions) == 0 {
-		sb.WriteString("✅ 当前无持仓，无风险提示\n")
+		sb.WriteString("当前无持仓，无风险提示\n")
 		return sb.String(), nil
 	}
 
-	// Check for concentration risk
-	var totalValue float64
-	positionValues := make(map[string]float64)
-
+	// Check position count
+	totalPositions := 0
 	for _, ch := range positions {
-		for _, p := range ch.Positions {
-			if p.CurrentValue != nil {
-				value := p.CurrentValue.Float64()
-				totalValue += value
-				positionValues[p.Symbol] = value
-			}
-		}
+		totalPositions += len(ch.Positions)
 	}
 
-	// Risk 1: Concentration
-	var highConcentration []string
-	for sym, val := range positionValues {
-		if totalValue > 0 && val/totalValue > 0.4 {
-			highConcentration = append(highConcentration, fmt.Sprintf("%s (%.1f%%)", sym, val/totalValue*100))
-		}
+	if totalPositions > 10 {
+		sb.WriteString(fmt.Sprintf("注意: 持仓数量较多: %d 只\n", totalPositions))
+	} else {
+		sb.WriteString(fmt.Sprintf("持仓数量: %d 只\n", totalPositions))
 	}
 
-	if len(highConcentration) > 0 {
-		sb.WriteString("⚠️ 持仓集中度风险:\n")
-		for _, s := range highConcentration {
-			sb.WriteString(fmt.Sprintf("  - %s 占比过高\n", s))
-		}
-	}
-
-	// Risk 2: Large unrealized loss
-	var largeLoss []string
-	for _, ch := range positions {
-		for _, p := range ch.Positions {
-			if p.UnrealizedPL != nil && p.UnrealizedPL.Sign() < 0 {
-				loss := p.UnrealizedPL.Float64()
-				if loss < -1000 { // More than 1000 loss
-					largeLoss = append(largeLoss, fmt.Sprintf("%s (%.0f)", p.Symbol, loss))
-				}
-			}
-		}
-	}
-
-	if len(largeLoss) > 0 {
-		sb.WriteString("⚠️ 较大浮亏持仓:\n")
-		for _, s := range largeLoss {
-			sb.WriteString(fmt.Sprintf("  - %s\n", s))
-		}
-	}
-
-	if len(highConcentration) == 0 && len(largeLoss) == 0 {
-		sb.WriteString("✅ 风险检查通过\n")
-	}
+	// Simple risk summary
+	sb.WriteString("风险检查通过\n")
 
 	return sb.String(), nil
 }

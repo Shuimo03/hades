@@ -9,104 +9,131 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/larksuite/oapi-sdk-go"
-	"github.com/larksuite/oapi-sdk-go/core"
-	"github.com/larksuite/oapi-sdk-go/service/im/v1"
 )
 
-// FeishuNotifier sends notifications to Feishu
+// FeishuNotifier sends notifications via Feishu API (app_id/app_secret)
 type FeishuNotifier struct {
-	appID     string
-	appSecret string
-	client    *lark.Client
-	userID    string // 接收消息的用户 open_id
+	appID      string
+	appSecret  string
+	userID     string
+	httpClient *http.Client
 }
 
 // NewFeishuNotifier creates a new Feishu notifier
 func NewFeishuNotifier(appID, appSecret, userID string) *FeishuNotifier {
-	config := lark.NewConfig(appID, appSecret)
-	client := lark.NewClient(config)
-
 	return &FeishuNotifier{
 		appID:     appID,
 		appSecret: appSecret,
-		client:    client,
 		userID:    userID,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 
-// Notify sends a notification to Feishu
+// Notify sends a notification to Feishu user
 func (n *FeishuNotifier) Notify(ctx context.Context, title, message string) error {
-	if n.appID == "" || n.appSecret == "" {
-		return fmt.Errorf("feishu app_id or app_secret not configured")
+	if n.appID == "" || n.appSecret == "" || n.userID == "" {
+		return fmt.Errorf("feishu config incomplete")
 	}
 
-	// 发送富文本卡片消息
-	card := n.buildCardMessage(title, message)
-
-	// 先尝试发送文本消息
-	content := fmt.Sprintf("%s\n\n%s", title, message)
-	resp, err := n.client.Im.MessageCreate(ctx, &lark.CreateMessageReq{
-		ReceiveIdType: lark.String("open_id"),
-		CreateMessageReqBody: &lark.CreateMessageReqBody{
-			ReceiveId: lark.String(n.userID),
-			MsgType:   lark.String("interactive"),
-			Content:   lark.String(card),
-		},
-	})
-
+	// Get access token
+	token, err := n.getAccessToken(ctx)
 	if err != nil {
-		log.Printf("[Feishu] Failed to send message: %v", err)
-		// 降级到 webhook
+		return fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	// Send message
+	return n.sendMessage(ctx, token, title, message)
+}
+
+func (n *FeishuNotifier) getAccessToken(ctx context.Context) (string, error) {
+	url := "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+
+	body := map[string]string{
+		"app_id":     n.appID,
+		"app_secret": n.appSecret,
+	}
+
+	data, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code              int    `json:"code"`
+		Msg               string `json:"msg"`
+		TenantAccessToken string `json:"tenant_access_token"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	if result.Code != 0 {
+		return "", fmt.Errorf("failed to get token: %s", result.Msg)
+	}
+
+	return result.TenantAccessToken, nil
+}
+
+func (n *FeishuNotifier) sendMessage(ctx context.Context, token, title, message string) error {
+	url := "https://open.feishu.cn/open-apis/im/v1/messages"
+
+	// Build rich text message
+	content := map[string]interface{}{
+		"text": fmt.Sprintf("%s\n\n%s", title, message),
+	}
+	contentJSON, _ := json.Marshal(content)
+
+	body := map[string]interface{}{
+		"receive_id":      n.userID,
+		"receive_id_type": "open_id",
+		"msg_type":        "text",
+		"content":         string(contentJSON),
+	}
+
+	data, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	if err != nil {
 		return err
 	}
 
-	if resp.Code != 0 {
-		log.Printf("[Feishu] API error: %d - %s", resp.Code, resp.Msg)
-		return fmt.Errorf("feishu api error: %s", resp.Msg)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
 	}
 
-	log.Printf("[Feishu] Message sent successfully")
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	if result.Code != 0 {
+		return fmt.Errorf("failed to send message: %s", result.Msg)
+	}
+
+	log.Printf("[Feishu] Message sent to user: %s", n.userID)
 	return nil
 }
 
-func (n *FeishuNotifier) buildCardMessage(title, message string) string {
-	// 构建飞书卡片消息 JSON
-	card := fmt.Sprintf(`{
-		"config": {
-			"wide_screen_mode": true
-		},
-		"header": {
-			"title": {
-				"tag": "plain_text",
-				"content": "%s"
-			},
-			"template": "blue"
-		},
-		"elements": [
-			{
-				"tag": "div",
-				"text": {
-					"tag": "lark_md",
-					"content": "%s"
-				}
-			}
-		]
-	}`, title, escapeForJSON(message))
-
-	return card
-}
-
-func escapeForJSON(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	return s
-}
-
-// WebhookNotifier sends notifications via webhook (Slack/DingTalk)
+// WebhookNotifier sends notifications via webhook (Feishu/Slack/DingTalk)
 type WebhookNotifier struct {
 	webhookURL string
 	httpClient *http.Client
@@ -237,12 +264,20 @@ func (n *WebhookNotifier) doRequest(payload map[string]interface{}) error {
 	return nil
 }
 
+func escapeForJSON(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\t", `\t`)
+	return s
+}
+
 // Notifier is the unified notifier interface
 type Notifier interface {
 	Notify(ctx context.Context, title, message string) error
 }
 
-// NewNotifier creates a new notifier based on configuration
+// NewNotifier creates a new notifier based on Feishu config
 func NewNotifier(webhookURL string) Notifier {
 	if webhookURL == "" {
 		return &DummyNotifier{}
@@ -252,15 +287,10 @@ func NewNotifier(webhookURL string) Notifier {
 
 // NewFeishuNotifierWithConfig creates a Feishu notifier from config
 func NewFeishuNotifierWithConfig(appID, appSecret, userID string) Notifier {
-	if appID == "" || appSecret == "" {
+	if appID == "" || appSecret == "" || userID == "" {
 		return &DummyNotifier{}
 	}
-	return &FeishuNotifier{
-		appID:     appID,
-		appSecret: appSecret,
-		client:    lark.NewClient(lark.NewConfig(appID, appSecret)),
-		userID:    userID,
-	}
+	return NewFeishuNotifier(appID, appSecret, userID)
 }
 
 // DummyNotifier is a no-op notifier
