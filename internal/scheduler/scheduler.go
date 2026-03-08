@@ -12,6 +12,16 @@ import (
 
 type Job func(ctx context.Context)
 
+var cronParser = cron.NewParser(
+	cron.SecondOptional |
+		cron.Minute |
+		cron.Hour |
+		cron.Dom |
+		cron.Month |
+		cron.Dow |
+		cron.Descriptor,
+)
+
 // Scheduler manages scheduled jobs
 type Scheduler struct {
 	cron     *cron.Cron
@@ -23,7 +33,7 @@ type Scheduler struct {
 // New creates a new scheduler
 func New() *Scheduler {
 	return &Scheduler{
-		cron: cron.New(cron.WithSeconds()),
+		cron: cron.New(cron.WithParser(cronParser)),
 		jobs: make(map[string]cron.EntryID),
 	}
 }
@@ -130,6 +140,6 @@ func (s *Scheduler) GetNextRun(name string) time.Time {
 
 // ValidateCronExpr validates a cron expression
 func ValidateCronExpr(expr string) error {
-	_, err := cron.ParseStandard(expr)
+	_, err := cronParser.Parse(expr)
 	return err
 }

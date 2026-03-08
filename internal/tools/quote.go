@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"hades/internal/longbridge"
 )
@@ -115,7 +116,26 @@ func NewTradesTool(lb *longbridge.Client) func(ctx context.Context, args map[str
 			return nil, fmt.Errorf("symbol must be a string")
 		}
 
-		trades, err := lb.GetTrades(ctx, symbol, 100)
+		startMillis, hasStart, err := parseOptionalInt64(args["start"])
+		if err != nil {
+			return nil, fmt.Errorf("start must be a number: %v", err)
+		}
+		endMillis, hasEnd, err := parseOptionalInt64(args["end"])
+		if err != nil {
+			return nil, fmt.Errorf("end must be a number: %v", err)
+		}
+		count, ok, err := parseOptionalInt(args["count"])
+		if err != nil {
+			return nil, fmt.Errorf("count must be a number: %v", err)
+		}
+		if !ok {
+			count = 100
+		}
+		if count <= 0 {
+			return nil, fmt.Errorf("count must be greater than 0")
+		}
+
+		trades, err := lb.GetTrades(ctx, symbol, int32(count))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get trades: %v", err)
 		}
@@ -123,13 +143,28 @@ func NewTradesTool(lb *longbridge.Client) func(ctx context.Context, args map[str
 			return map[string]interface{}{"result": "未获取到成交数据"}, nil
 		}
 
-		var result string
+		filtered := make([]string, 0, len(trades))
 		for _, t := range trades {
-			result += fmt.Sprintf("时间: %d, 价格: %s, 成交量: %d\n",
-				t.Timestamp, t.Price, t.Volume)
+			if t == nil {
+				continue
+			}
+			if hasStart && t.Timestamp < startMillis {
+				continue
+			}
+			if hasEnd && t.Timestamp > endMillis {
+				continue
+			}
+			filtered = append(filtered, fmt.Sprintf("时间: %s, 价格: %s, 成交量: %d",
+				time.UnixMilli(t.Timestamp).Format("2006-01-02 15:04:05"), t.Price, t.Volume))
+			if len(filtered) >= count {
+				break
+			}
+		}
+		if len(filtered) == 0 {
+			return map[string]interface{}{"result": "未获取到成交数据"}, nil
 		}
 
-		return map[string]interface{}{"result": result}, nil
+		return map[string]interface{}{"result": joinLines(filtered)}, nil
 	}
 }
 
@@ -161,6 +196,14 @@ func splitAndTrim(s string) []string {
 	}
 	if current != "" {
 		result = append(result, current)
+	}
+	return result
+}
+
+func joinLines(lines []string) string {
+	result := ""
+	for _, line := range lines {
+		result += line + "\n"
 	}
 	return result
 }

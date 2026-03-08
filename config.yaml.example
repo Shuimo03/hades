@@ -31,3 +31,7 @@ feishu:
   app_id: ""       # 飞书应用 App ID
   app_secret: ""   # 飞书应用 App Secret
   user_id: ""      # 接收消息的用户 open_id
+
+# Logging Configuration
+log:
+  level: "info"    # debug, info, warn, error

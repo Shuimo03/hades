@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/robfig/cron/v3"
+	"hades/internal/scheduler"
 )
 
 // ExecutionWindow represents a scheduled execution window
@@ -98,7 +98,7 @@ func (m *ExecutionWindowManager) Save() error {
 // Create creates a new execution window
 func (m *ExecutionWindowManager) Create(window *ExecutionWindow) error {
 	// Validate cron expression
-	if _, err := cron.ParseStandard(window.Schedule); err != nil {
+	if err := scheduler.ValidateCronExpr(window.Schedule); err != nil {
 		return fmt.Errorf("invalid cron expression: %w", err)
 	}
 
@@ -159,7 +159,7 @@ func (m *ExecutionWindowManager) Update(id string, updates map[string]interface{
 	}
 	if schedule, ok := updates["schedule"].(string); ok {
 		// Validate cron expression
-		if _, err := cron.ParseStandard(schedule); err != nil {
+		if err := scheduler.ValidateCronExpr(schedule); err != nil {
 			return nil, fmt.Errorf("invalid cron expression: %w", err)
 		}
 		window.Schedule = schedule

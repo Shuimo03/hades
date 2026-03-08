@@ -7,6 +7,7 @@ import (
 
 	"hades/internal/alerts"
 	"hades/internal/longbridge"
+	"hades/internal/scheduler"
 )
 
 // NewCreateSignalAlertTool creates a tool for creating signal alerts
@@ -27,14 +28,22 @@ func NewCreateSignalAlertTool(lb *longbridge.Client, mgr *alerts.Manager) func(c
 			return nil, fmt.Errorf("missing or invalid condition parameter")
 		}
 
-		threshold, ok := args["threshold"].(float64)
-		if !ok {
-			return nil, fmt.Errorf("missing or invalid threshold parameter")
+		threshold := 0.0
+		if rawThreshold, exists := args["threshold"]; exists && rawThreshold != nil {
+			value, ok := rawThreshold.(float64)
+			if !ok {
+				return nil, fmt.Errorf("invalid threshold parameter")
+			}
+			threshold = value
 		}
 
 		note := ""
 		if n, ok := args["note"].(string); ok {
 			note = n
+		}
+
+		if alerts.AlertType(alertTypeStr) != alerts.AlertTypeTrend && threshold == 0 {
+			return nil, fmt.Errorf("missing threshold parameter")
 		}
 
 		alert := &alerts.Alert{
@@ -132,7 +141,7 @@ func NewEnableSignalAlertTool(mgr *alerts.Manager) func(ctx context.Context, arg
 }
 
 // NewCheckAlertsTool creates a tool for manually checking alerts
-func NewCheckAlertsTool(lb *longbridge.Client, mgr *alerts.Manager) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+func NewCheckAlertsTool(mgr *alerts.Manager) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 		mgr.CheckAll(ctx)
 		return map[string]interface{}{"result": "触发检查完成"}, nil
@@ -140,7 +149,7 @@ func NewCheckAlertsTool(lb *longbridge.Client, mgr *alerts.Manager) func(ctx con
 }
 
 // NewCreateExecutionWindowTool creates a tool for creating execution windows
-func NewCreateExecutionWindowTool(mgr *alerts.ExecutionWindowManager) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+func NewCreateExecutionWindowTool(mgr *alerts.ExecutionWindowManager, sched *scheduler.Scheduler) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
@@ -162,16 +171,30 @@ func NewCreateExecutionWindowTool(mgr *alerts.ExecutionWindowManager) func(ctx c
 			webhookURL = w
 		}
 
+		enabled := true
+		if v, ok := args["enabled"].(bool); ok {
+			enabled = v
+		}
+
 		window := &alerts.ExecutionWindow{
 			Name:       name,
 			Schedule:   schedule,
 			Strategy:   strategy,
 			WebhookURL: webhookURL,
-			Enabled:    true,
+			Enabled:    enabled,
 		}
 
 		if err := mgr.Create(window); err != nil {
 			return nil, fmt.Errorf("failed to create execution window: %v", err)
+		}
+
+		if window.Enabled {
+			if err := sched.AddJob(executionWindowJobName(window.ID), window.Schedule, func(ctx context.Context) {
+				mgr.Trigger(window.ID)
+			}); err != nil {
+				mgr.Delete(window.ID)
+				return nil, fmt.Errorf("failed to schedule execution window: %v", err)
+			}
 		}
 
 		return map[string]interface{}{
@@ -213,7 +236,7 @@ func NewListExecutionWindowsTool(mgr *alerts.ExecutionWindowManager) func(ctx co
 }
 
 // NewDeleteExecutionWindowTool creates a tool for deleting execution windows
-func NewDeleteExecutionWindowTool(mgr *alerts.ExecutionWindowManager) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+func NewDeleteExecutionWindowTool(mgr *alerts.ExecutionWindowManager, sched *scheduler.Scheduler) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 		windowID, ok := args["window_id"].(string)
 		if !ok || windowID == "" {
@@ -224,6 +247,12 @@ func NewDeleteExecutionWindowTool(mgr *alerts.ExecutionWindowManager) func(ctx c
 			return nil, fmt.Errorf("window not found: %s", windowID)
 		}
 
+		sched.RemoveJob(executionWindowJobName(windowID))
+
 		return map[string]interface{}{"result": fmt.Sprintf("已删除执行窗口: %s", windowID)}, nil
 	}
+}
+
+func executionWindowJobName(windowID string) string {
+	return "execution_window_" + windowID
 }

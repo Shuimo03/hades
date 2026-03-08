@@ -28,19 +28,50 @@ func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args m
 			}
 		}
 
-		count := int32(100)
-		if countI, ok := args["count"]; ok {
-			switch v := countI.(type) {
-			case float64:
-				count = int32(v)
-			case int:
-				count = int32(v)
-			}
+		startMillis, hasStart, err := parseOptionalInt64(args["start"])
+		if err != nil {
+			return nil, fmt.Errorf("start must be a number: %v", err)
+		}
+		endMillis, hasEnd, err := parseOptionalInt64(args["end"])
+		if err != nil {
+			return nil, fmt.Errorf("end must be a number: %v", err)
 		}
 
-		candles, err := lb.GetCandlesticks(ctx, symbol, period, count)
+		count, ok, err := parseOptionalInt32(args["count"])
 		if err != nil {
-			return nil, fmt.Errorf("failed to get candlesticks: %v", err)
+			return nil, fmt.Errorf("count must be a number: %v", err)
+		}
+		if !ok {
+			count, ok, err = parseOptionalInt32(args["size"])
+			if err != nil {
+				return nil, fmt.Errorf("size must be a number: %v", err)
+			}
+		}
+		if !ok {
+			if hasStart || hasEnd {
+				count = 500
+			} else {
+				count = 100
+			}
+		}
+		if count <= 0 {
+			return nil, fmt.Errorf("count must be greater than 0")
+		}
+
+		var candles []*quote.Candlestick
+		if hasStart || hasEnd {
+			startDate := timePointerOrNil(startMillis, hasStart)
+			endDate := timePointerOrNil(endMillis, hasEnd)
+
+			candles, err = lb.GetHistoryCandlesticksByDate(ctx, symbol, period, startDate, endDate)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get history candlesticks: %v", err)
+			}
+		} else {
+			candles, err = lb.GetCandlesticks(ctx, symbol, period, count)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get candlesticks: %v", err)
+			}
 		}
 		if len(candles) == 0 {
 			return map[string]interface{}{"result": "未获取到K线数据"}, nil
@@ -49,6 +80,15 @@ func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args m
 		// Use structured JSON format for better parsing
 		var result []map[string]interface{}
 		for _, c := range candles {
+			if c == nil {
+				continue
+			}
+			if hasStart && c.Timestamp < startMillis {
+				continue
+			}
+			if hasEnd && c.Timestamp > endMillis {
+				continue
+			}
 			// Timestamp is in milliseconds
 			t := time.Unix(c.Timestamp/1000, 0)
 			result = append(result, map[string]interface{}{
@@ -60,9 +100,20 @@ func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args m
 				"volume":   c.Volume,
 			})
 		}
+		if len(result) == 0 {
+			return map[string]interface{}{"result": "未获取到K线数据"}, nil
+		}
 
 		return map[string]interface{}{"result": result}, nil
 	}
+}
+
+func timePointerOrNil(unixMillis int64, ok bool) *time.Time {
+	if !ok {
+		return nil
+	}
+	t := time.UnixMilli(unixMillis)
+	return &t
 }
 
 func parsePeriod(p string) quote.Period {

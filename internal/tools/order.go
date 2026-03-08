@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/longportapp/openapi-go/trade"
 	"github.com/shopspring/decimal"
@@ -45,7 +47,7 @@ func NewSubmitOrderTool(lb *longbridge.Client) func(ctx context.Context, args ma
 			}
 		}
 
-		orderType := trade.OrderType(1) // LO
+		orderType := trade.OrderTypeLO
 		if orderTypeI, ok := args["order_type"]; ok {
 			if ot, ok := orderTypeI.(string); ok {
 				orderType = parseOrderType(ot)
@@ -106,7 +108,7 @@ func NewCancelOrderTool(lb *longbridge.Client) func(ctx context.Context, args ma
 
 func NewOrdersTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
-		orders, err := lb.GetOrders(ctx)
+		orders, err := lb.GetOrders(ctx, parseOrderStatuses(args["status"]))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get orders: %v", err)
 		}
@@ -154,7 +156,17 @@ func NewHistoryExecutionsTool(lb *longbridge.Client) func(ctx context.Context, a
 			symbol, _ = symbolI.(string)
 		}
 
-		executions, err := lb.GetHistoryExecutions(ctx, symbol)
+		startAt, err := parseOptionalUnixMillis(args["start"])
+		if err != nil {
+			return nil, fmt.Errorf("invalid start parameter: %v", err)
+		}
+
+		endAt, err := parseOptionalUnixMillis(args["end"])
+		if err != nil {
+			return nil, fmt.Errorf("invalid end parameter: %v", err)
+		}
+
+		executions, err := lb.GetHistoryExecutions(ctx, symbol, startAt, endAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get history executions: %v", err)
 		}
@@ -164,8 +176,8 @@ func NewHistoryExecutionsTool(lb *longbridge.Client) func(ctx context.Context, a
 
 		var result string
 		for _, e := range executions {
-			result += fmt.Sprintf("股票: %s, 订单ID: %s, 数量: %s, 价格: %v\n",
-				e.Symbol, e.OrderId, e.Quantity, e.Price)
+			result += fmt.Sprintf("时间: %s, 股票: %s, 订单ID: %s, 数量: %s, 价格: %v\n",
+				e.TradeDoneAt.Format("2006-01-02 15:04:05"), e.Symbol, e.OrderId, e.Quantity, e.Price)
 		}
 
 		return map[string]interface{}{"result": result}, nil
@@ -174,20 +186,34 @@ func NewHistoryExecutionsTool(lb *longbridge.Client) func(ctx context.Context, a
 
 func parseOrderType(t string) trade.OrderType {
 	switch t {
-	case "LO":
-		return trade.OrderType(1)
-	case "EO":
-		return trade.OrderType(2)
-	case "SC":
-		return trade.OrderType(3)
-	case "AO":
-		return trade.OrderType(4)
-	case "LOC":
-		return trade.OrderType(5)
-	case "ELOC":
-		return trade.OrderType(6)
+	case "LO", "lo", "limit":
+		return trade.OrderTypeLO
+	case "ELO", "elo":
+		return trade.OrderTypeELO
+	case "MO", "mo", "market":
+		return trade.OrderTypeMO
+	case "AO", "ao":
+		return trade.OrderTypeAO
+	case "ALO", "alo":
+		return trade.OrderTypeALO
+	case "ODD", "odd":
+		return trade.OrderTypeODD
+	case "LIT", "lit":
+		return trade.OrderTypeLIT
+	case "MIT", "mit":
+		return trade.OrderTypeMIT
+	case "TSLPAMT", "tslpamt":
+		return trade.OrderTypeTSLPAMT
+	case "TSLPPCT", "tslppct":
+		return trade.OrderTypeTSLPPCT
+	case "TSMAMT", "tsmamt":
+		return trade.OrderTypeTSMAMT
+	case "TSMPCT", "tsmpct":
+		return trade.OrderTypeTSMPCT
+	case "SLO", "slo":
+		return trade.OrderTypeSLO
 	default:
-		return trade.OrderType(1)
+		return trade.OrderTypeLO
 	}
 }
 
@@ -204,9 +230,60 @@ func parseSide(s string) trade.OrderSide {
 
 func parseTimeInForce(t string) trade.TimeType {
 	switch t {
-	case "day":
+	case "day", "DAY", "Day":
 		return trade.TimeTypeDay
+	case "gtc", "GTC":
+		return trade.TimeTypeGTC
+	case "gtd", "GTD":
+		return trade.TimeTypeGTD
 	default:
 		return trade.TimeTypeDay
 	}
+}
+
+func parseOrderStatuses(raw interface{}) []trade.OrderStatus {
+	statuses := splitStringArg(raw)
+	if len(statuses) == 0 {
+		return nil
+	}
+
+	result := make([]trade.OrderStatus, 0, len(statuses))
+	for _, status := range statuses {
+		if parsed, ok := mapOrderStatus(status); ok {
+			result = append(result, parsed)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func mapOrderStatus(value string) (trade.OrderStatus, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "all":
+		return "", false
+	case "filled":
+		return trade.OrderFilledStatus, true
+	case "cancelled", "canceled":
+		return trade.OrderCanceledStatus, true
+	case "pending":
+		return trade.OrderNewStatus, true
+	case "partial_filled", "partial-filled", "partialfilled":
+		return trade.OrderPartialFilledStatus, true
+	case "rejected", "failed":
+		return trade.OrderRejectedStatus, true
+	case "expired":
+		return trade.OrderExpiredStatus, true
+	default:
+		return trade.OrderStatus(value), true
+	}
+}
+
+func parseOptionalUnixMillis(raw interface{}) (time.Time, error) {
+	millis, ok, err := parseOptionalInt64(raw)
+	if err != nil || !ok {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(millis), nil
 }

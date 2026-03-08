@@ -7,12 +7,15 @@ import (
 )
 
 type Config struct {
-	AppKey      string `yaml:"app_key"`
-	AppSecret   string `yaml:"app_secret"`
-	AccessToken string `yaml:"access_token"`
-	ServerHost  string `yaml:"host"`
-	ServerPort  int    `yaml:"port"`
-	Region      string `yaml:"region"`
+	AppKey      string       `yaml:"app_key"`
+	AppSecret   string       `yaml:"app_secret"`
+	AccessToken string       `yaml:"access_token"`
+	Region      string       `yaml:"region"`
+	Server      ServerConfig `yaml:"server"`
+
+	// Backward-compatible legacy server fields.
+	ServerHost string `yaml:"host"`
+	ServerPort int    `yaml:"port"`
 
 	// Daily Brief Configuration
 	DailyBrief *DailyBriefConfig `yaml:"daily_brief"`
@@ -28,6 +31,11 @@ type Config struct {
 
 	// Log Configuration
 	Log *LogConfig `yaml:"log"`
+}
+
+type ServerConfig struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
 }
 
 type DailyBriefConfig struct {
@@ -96,13 +104,22 @@ func Load(path string) (*Config, error) {
 	if cfg.Region != "" {
 		os.Setenv("LONGPORT_REGION", cfg.Region)
 	}
+	if cfg.Log != nil && cfg.Log.Level != "" {
+		os.Setenv("LONGPORT_LOG_LEVEL", cfg.Log.Level)
+	}
 
 	// Set defaults
-	if cfg.ServerHost == "" {
-		cfg.ServerHost = "0.0.0.0"
+	if cfg.Server.Host == "" {
+		cfg.Server.Host = cfg.ServerHost
 	}
-	if cfg.ServerPort == 0 {
-		cfg.ServerPort = 8080
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = cfg.ServerPort
+	}
+	if cfg.Server.Host == "" {
+		cfg.Server.Host = "0.0.0.0"
+	}
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 8080
 	}
 
 	// Set Daily Brief defaults

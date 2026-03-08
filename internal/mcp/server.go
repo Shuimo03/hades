@@ -205,7 +205,7 @@ func (s *HTTPServer) handleToolsCall(w http.ResponseWriter, id interface{}, para
 	if result != nil {
 		content = append(content, map[string]interface{}{
 			"type": "text",
-			"text": fmt.Sprintf("%v", result),
+			"text": formatToolResult(result),
 		})
 	}
 
@@ -225,4 +225,23 @@ func (s *HTTPServer) handleToolsCall(w http.ResponseWriter, id interface{}, para
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func formatToolResult(result map[string]interface{}) string {
+	if text, ok := result["result"].(string); ok && len(result) == 1 {
+		return text
+	}
+
+	if value, ok := result["result"]; ok && len(result) == 1 {
+		encoded, err := json.MarshalIndent(value, "", "  ")
+		if err == nil {
+			return string(encoded)
+		}
+	}
+
+	encoded, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", result)
+	}
+	return string(encoded)
 }

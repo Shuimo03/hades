@@ -3,8 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-
-	"github.com/longportapp/openapi-go/trade"
 	"hades/internal/longbridge"
 )
 
@@ -44,35 +42,46 @@ func NewAccountInfoTool(lb *longbridge.Client) func(ctx context.Context, args ma
 
 func NewPositionsTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
-		positionChannels, err := lb.GetPositions(ctx)
+		snapshots, err := buildPositionSnapshots(ctx, lb)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get positions: %v", err)
+			return nil, err
 		}
-		if len(positionChannels) == 0 {
-			return map[string]interface{}{"result": "当前无持仓"}, nil
-		}
-
-		var allPositions []*trade.StockPosition
-		for _, ch := range positionChannels {
-			allPositions = append(allPositions, ch.Positions...)
-		}
-
-		if len(allPositions) == 0 {
-			return map[string]interface{}{"result": "当前无持仓"}, nil
+		if len(snapshots) == 0 {
+			return map[string]interface{}{
+				"result": map[string]interface{}{
+					"count":   0,
+					"summary": summarizePositionSnapshots(snapshots),
+					"items":   []map[string]interface{}{},
+				},
+			}, nil
 		}
 
-		var result string
-		for _, p := range allPositions {
-			result += fmt.Sprintf(`%s %s:
-  数量: %s, 可用: %s
-  成本价: %v, 市场: %s
-`,
-				p.Symbol, p.SymbolName,
-				p.Quantity, p.AvailableQuantity,
-				p.CostPrice, p.Market,
-			)
+		items := make([]map[string]interface{}, 0, len(snapshots))
+		for _, snapshot := range snapshots {
+			position := snapshot.Position
+			items = append(items, map[string]interface{}{
+				"symbol":             position.Symbol,
+				"symbol_name":        position.SymbolName,
+				"quantity":           round2(snapshot.Quantity),
+				"available_quantity": round2(snapshot.AvailableQuantity),
+				"currency":           position.Currency,
+				"market":             fmt.Sprintf("%v", position.Market),
+				"cost_price":         snapshot.CostPrice,
+				"last_price":         snapshot.LastPrice,
+				"cost_basis":         snapshot.CostBasis,
+				"market_value":       snapshot.MarketValue,
+				"unrealized_pnl":     snapshot.UnrealizedPnL,
+				"unrealized_pnl_pct": snapshot.UnrealizedPnLPct,
+				"has_quote":          snapshot.HasQuote,
+			})
 		}
 
-		return map[string]interface{}{"result": result}, nil
+		return map[string]interface{}{
+			"result": map[string]interface{}{
+				"count":   len(items),
+				"summary": summarizePositionSnapshots(snapshots),
+				"items":   items,
+			},
+		}, nil
 	}
 }

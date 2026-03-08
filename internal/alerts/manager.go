@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/longportapp/openapi-go/quote"
 	"hades/internal/longbridge"
 )
 
@@ -27,10 +28,13 @@ const (
 type AlertCondition string
 
 const (
-	AlertConditionAbove     AlertCondition = "above"      // 价格高于
-	AlertConditionBelow     AlertCondition = "below"      // 价格低于
-	AlertConditionCrossUp   AlertCondition = "cross_up"   // 上穿
-	AlertConditionCrossDown AlertCondition = "cross_down" // 下穿
+	AlertConditionAbove          AlertCondition = "above"      // 价格高于
+	AlertConditionBelow          AlertCondition = "below"      // 价格低于
+	AlertConditionCrossUp        AlertCondition = "cross_up"   // 上穿
+	AlertConditionCrossDown      AlertCondition = "cross_down" // 下穿
+	AlertConditionInBuyZone      AlertCondition = "in_buy_zone"
+	AlertConditionNearTakeProfit AlertCondition = "near_take_profit"
+	AlertConditionBelowStopLoss  AlertCondition = "below_stop_loss"
 )
 
 // Alert represents a signal alert
@@ -253,8 +257,9 @@ func (m *Manager) CheckAll(ctx context.Context) {
 }
 
 // checkAlert checks a single alert
-func (m *Manager) checkAlert(ctx context.Context, alert *Alert, quote interface{}) {
-	if quote == nil {
+func (m *Manager) checkAlert(ctx context.Context, alert *Alert, securityQuote interface{}) {
+	q, ok := securityQuote.(*quote.Quote)
+	if !ok || q == nil {
 		return
 	}
 
@@ -263,11 +268,13 @@ func (m *Manager) checkAlert(ctx context.Context, alert *Alert, quote interface{
 
 	switch alert.AlertType {
 	case AlertTypePrice:
-		message = m.checkPriceAlert(alert, quote)
+		message = m.checkPriceAlert(alert, q)
 	case AlertTypeVolatility:
-		message = m.checkVolatilityAlert(alert, quote)
+		message = m.checkVolatilityAlert(alert, q)
 	case AlertTypeVolume:
-		message = m.checkVolumeAlert(alert, quote)
+		message = m.checkVolumeAlert(ctx, alert, q)
+	case AlertTypeTrend:
+		message = m.checkTrendAlert(ctx, alert, q)
 	}
 
 	if message != "" && m.callback != nil {
@@ -278,30 +285,12 @@ func (m *Manager) checkAlert(ctx context.Context, alert *Alert, quote interface{
 	}
 }
 
-func (m *Manager) checkPriceAlert(alert *Alert, quote interface{}) string {
-	// Type assertion to get price
-	type quoteInterface interface {
-		GetLastDone() interface{}
-	}
-
-	q, ok := quote.(quoteInterface)
-	if !ok {
+func (m *Manager) checkPriceAlert(alert *Alert, q *quote.Quote) string {
+	if q.LastDone == nil {
 		return ""
 	}
 
-	lastDone := q.GetLastDone()
-	if lastDone == nil {
-		return ""
-	}
-
-	// Try to convert to float64
-	var price float64
-	switch v := lastDone.(type) {
-	case float64:
-		price = v
-	default:
-		return ""
-	}
+	price, _ := q.LastDone.Float64()
 
 	switch alert.Condition {
 	case AlertConditionAbove:
@@ -317,34 +306,15 @@ func (m *Manager) checkPriceAlert(alert *Alert, quote interface{}) string {
 	return ""
 }
 
-func (m *Manager) checkVolatilityAlert(alert *Alert, quote interface{}) string {
-	// For volatility, we need high/low from quote
-	type volatilityQuote interface {
-		GetHigh() interface{}
-		GetLow() interface{}
-		GetOpen() interface{}
-	}
-
-	q, ok := quote.(volatilityQuote)
-	if !ok {
+func (m *Manager) checkVolatilityAlert(alert *Alert, q *quote.Quote) string {
+	if q.High == nil || q.Low == nil || q.Open == nil {
 		return ""
 	}
 
-	// Get values
-	getFloat := func(v interface{}) float64 {
-		switch val := v.(type) {
-		case float64:
-			return val
-		default:
-			return 0
-		}
-	}
-
-	high := getFloat(q.GetHigh())
-	low := getFloat(q.GetLow())
-	open := getFloat(q.GetOpen())
-
-	if high == 0 || low == 0 {
+	high, _ := q.High.Float64()
+	low, _ := q.Low.Float64()
+	open, _ := q.Open.Float64()
+	if high == 0 || low == 0 || open == 0 {
 		return ""
 	}
 
@@ -359,26 +329,93 @@ func (m *Manager) checkVolatilityAlert(alert *Alert, quote interface{}) string {
 	return ""
 }
 
-func (m *Manager) checkVolumeAlert(alert *Alert, quote interface{}) string {
-	type volumeQuote interface {
-		GetVolume() int64
-		GetLastDone() interface{}
-	}
-
-	q, ok := quote.(volumeQuote)
-	if !ok {
+func (m *Manager) checkVolumeAlert(ctx context.Context, alert *Alert, q *quote.Quote) string {
+	candles, err := m.lb.GetCandlesticks(ctx, alert.Symbol, quote.Period(1), 20)
+	if err != nil || len(candles) < 2 {
 		return ""
 	}
 
-	// For volume alert, we need to compare with average
-	// This is a simplified version - in production, you'd want historical average
-	_ = q.GetVolume()
+	var total int64
+	var samples int64
+	for _, candle := range candles[1:] {
+		if candle == nil {
+			continue
+		}
+		total += candle.Volume
+		samples++
+	}
+	if samples == 0 {
+		return ""
+	}
 
-	// Threshold represents multiplier (e.g., 2.0 means 2x average)
-	// This would need historical data in production
-	_ = alert.Threshold
+	average := float64(total) / float64(samples)
+	if average == 0 {
+		return ""
+	}
 
-	// Placeholder - would need to track average volume over time
+	current := float64(q.Volume)
+	multiple := current / average
+
+	switch alert.Condition {
+	case AlertConditionAbove:
+		if multiple >= alert.Threshold {
+			return fmt.Sprintf("[成交量提醒] %s 当前成交量为近 %d 日均量的 %.2f 倍",
+				alert.Symbol, samples, multiple)
+		}
+	case AlertConditionBelow:
+		if multiple <= alert.Threshold {
+			return fmt.Sprintf("[成交量提醒] %s 当前成交量仅为近 %d 日均量的 %.2f 倍",
+				alert.Symbol, samples, multiple)
+		}
+	}
+
+	return ""
+}
+
+func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q *quote.Quote) string {
+	if q.LastDone == nil {
+		return ""
+	}
+
+	metrics, err := buildAlertPlanMetrics(ctx, m.lb, alert.Symbol)
+	if err != nil {
+		return ""
+	}
+
+	price, _ := q.LastDone.Float64()
+	switch alert.Condition {
+	case AlertConditionInBuyZone:
+		if price >= metrics.BuyLow && price <= metrics.BuyHigh {
+			return fmt.Sprintf("[买入区提醒] %s 进入关注买入区 %.2f - %.2f (当前: %.2f)",
+				alert.Symbol, metrics.BuyLow, metrics.BuyHigh, price)
+		}
+	case AlertConditionNearTakeProfit:
+		bufferPct := alert.Threshold
+		if bufferPct <= 0 {
+			bufferPct = 1.0
+		}
+		triggerPrice := metrics.TakeProfit * (1 - bufferPct/100)
+		if metrics.IsHeld && price >= triggerPrice {
+			return fmt.Sprintf("[止盈提醒] %s 接近计划止盈位 %.2f (当前: %.2f, 提前 %.2f%% 提醒)",
+				alert.Symbol, metrics.TakeProfit, price, bufferPct)
+		}
+	case AlertConditionBelowStopLoss:
+		if metrics.IsHeld && price <= metrics.StopLoss {
+			return fmt.Sprintf("[止损提醒] %s 跌破计划止损位 %.2f (当前: %.2f)",
+				alert.Symbol, metrics.StopLoss, price)
+		}
+	case AlertConditionCrossUp:
+		if price > metrics.BuyHigh {
+			return fmt.Sprintf("[趋势提醒] %s 向上脱离买入区，关注是否形成突破 (当前: %.2f)",
+				alert.Symbol, price)
+		}
+	case AlertConditionCrossDown:
+		if price < metrics.StopLoss {
+			return fmt.Sprintf("[趋势提醒] %s 跌破计划止损位 %.2f (当前: %.2f)",
+				alert.Symbol, metrics.StopLoss, price)
+		}
+	}
+
 	return ""
 }
 
