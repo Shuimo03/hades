@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "/Users/mac/code/hades": {
+      "mcpServers": {
+        "hades": {
+          "type": "http",
+          "url": "http://localhost:8080/mcp/"
+        }
+      }
+    }
+  }
+}

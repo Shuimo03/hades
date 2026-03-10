@@ -16,6 +16,7 @@ import (
 	"hades/internal/config"
 	"hades/internal/longbridge"
 	"hades/internal/mcp"
+	"hades/internal/okx"
 	"hades/internal/scheduler"
 	"hades/internal/tools"
 )
@@ -49,6 +50,17 @@ func main() {
 		log.Fatalf("Failed to create LongBridge client: %v", err)
 	}
 	defer lb.Close()
+
+	// Create OKX client (optional)
+	var okxClient *okx.Client
+	if cfg.Okx != nil && cfg.Okx.Enabled {
+		if cfg.Okx.APIKey == "" || cfg.Okx.SecretKey == "" || cfg.Okx.Passphrase == "" {
+			log.Printf("[OKX] Missing api_key/secret_key/passphrase, skip OKX client")
+		} else {
+			okxClient = okx.NewClient(cfg.Okx.APIKey, cfg.Okx.SecretKey, cfg.Okx.Passphrase, cfg.Okx.BaseURL)
+			log.Printf("[OKX] OKX client initialized")
+		}
+	}
 
 	// Create scheduler
 	sched := scheduler.New()
@@ -576,6 +588,108 @@ func main() {
 			},
 		},
 	}, tools.NewHistoryExecutionsTool(lb))
+
+	// Register OKX tools (crypto)
+	if okxClient != nil {
+		server.AddTool("okx_get_ticker", "获取 OKX 单币对行情", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_id": map[string]interface{}{
+					"type":        "string",
+					"description": "交易对ID，如: BTC-USDT",
+				},
+			},
+		}, tools.NewOkxTickerTool(okxClient))
+
+		server.AddTool("okx_get_orderbook", "获取 OKX 盘口", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_id": map[string]interface{}{
+					"type":        "string",
+					"description": "交易对ID，如: BTC-USDT",
+				},
+				"depth": map[string]interface{}{
+					"type":        "integer",
+					"description": "深度条数，默认5",
+				},
+			},
+		}, tools.NewOkxOrderBookTool(okxClient))
+
+		server.AddTool("okx_get_trades", "获取 OKX 最近成交", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_id": map[string]interface{}{
+					"type":        "string",
+					"description": "交易对ID",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "返回条数，默认100",
+				},
+			},
+		}, tools.NewOkxTradesTool(okxClient))
+
+		server.AddTool("okx_get_candles", "获取 OKX K 线", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_id": map[string]interface{}{
+					"type":        "string",
+					"description": "交易对ID",
+				},
+				"bar": map[string]interface{}{
+					"type":        "string",
+					"description": "K线周期，如 1m/5m/15m/1H/1D",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "返回条数，默认100",
+				},
+			},
+		}, tools.NewOkxCandlesTool(okxClient))
+
+		server.AddTool("okx_get_balances", "获取 OKX 账户资产", map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		}, tools.NewOkxBalancesTool(okxClient))
+
+		okxOrderSchema := map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_id":   map[string]interface{}{"type": "string", "description": "交易对ID"},
+				"side":      map[string]interface{}{"type": "string", "description": "buy 或 sell"},
+				"ord_type":  map[string]interface{}{"type": "string", "description": "订单类型: limit 或 market"},
+				"sz":        map[string]interface{}{"type": "string", "description": "下单数量"},
+				"px":        map[string]interface{}{"type": "string", "description": "价格，市价单可省略"},
+				"td_mode":   map[string]interface{}{"type": "string", "description": "交易模式，默认 cash"},
+				"cl_ord_id": map[string]interface{}{"type": "string", "description": "自定义订单ID，可选"},
+			},
+		}
+		server.AddTool("okx_place_order", "OKX 下单", okxOrderSchema, tools.NewOkxPlaceOrderTool(okxClient))
+
+		server.AddTool("okx_cancel_order", "OKX 撤单", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_id":   map[string]interface{}{"type": "string", "description": "交易对ID"},
+				"ord_id":    map[string]interface{}{"type": "string", "description": "订单ID"},
+				"cl_ord_id": map[string]interface{}{"type": "string", "description": "自定义订单ID，可选"},
+			},
+		}, tools.NewOkxCancelOrderTool(okxClient))
+
+		server.AddTool("okx_get_open_orders", "OKX 当前挂单", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_type": map[string]interface{}{"type": "string", "description": "产品类型，默认 SPOT"},
+			},
+		}, tools.NewOkxOpenOrdersTool(okxClient))
+
+		server.AddTool("okx_get_order_history", "OKX 历史订单", map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"inst_type": map[string]interface{}{"type": "string", "description": "产品类型，默认 SPOT"},
+				"limit":     map[string]interface{}{"type": "integer", "description": "返回条数，默认50"},
+			},
+		}, tools.NewOkxOrderHistoryTool(okxClient))
+	}
 
 	// Register Daily Brief tools
 	dailyBriefSchema := map[string]interface{}{

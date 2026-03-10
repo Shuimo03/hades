@@ -174,13 +174,41 @@ func NewHistoryExecutionsTool(lb *longbridge.Client) func(ctx context.Context, a
 			return map[string]interface{}{"result": "暂无成交记录"}, nil
 		}
 
-		var result string
+		items := make([]map[string]interface{}, 0, len(executions))
 		for _, e := range executions {
-			result += fmt.Sprintf("时间: %s, 股票: %s, 订单ID: %s, 数量: %s, 价格: %v\n",
-				e.TradeDoneAt.Format("2006-01-02 15:04:05"), e.Symbol, e.OrderId, e.Quantity, e.Price)
+			if e == nil {
+				continue
+			}
+			items = append(items, map[string]interface{}{
+				"trade_done_at":         e.TradeDoneAt.Format("2006-01-02 15:04:05"),
+				"trade_done_at_unix_ms": e.TradeDoneAt.UnixMilli(),
+				"symbol":                e.Symbol,
+				"order_id":              e.OrderId,
+				"quantity":              fmt.Sprintf("%v", e.Quantity),
+				"price":                 fmt.Sprintf("%v", e.Price),
+			})
 		}
 
-		return map[string]interface{}{"result": result}, nil
+		query := map[string]interface{}{
+			"symbol": symbol,
+			"start":  nil,
+			"end":    nil,
+		}
+		if !startAt.IsZero() {
+			query["start"] = startAt.UnixMilli()
+		}
+		if !endAt.IsZero() {
+			query["end"] = endAt.UnixMilli()
+		}
+
+		return map[string]interface{}{
+			"result": map[string]interface{}{
+				"summary": fmt.Sprintf("共 %d 笔成交记录", len(items)),
+				"query":   query,
+				"count":   len(items),
+				"items":   items,
+			},
+		}, nil
 	}
 }
 

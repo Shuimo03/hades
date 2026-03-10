@@ -20,6 +20,17 @@
 - 订单详情: `get_order_detail`
 - 历史成交: `get_history_executions`
 
+### 加密货币 (OKX)
+- 币对行情: `okx_get_ticker`
+- 盘口深度: `okx_get_orderbook`
+- 最近成交: `okx_get_trades`
+- K 线: `okx_get_candles`
+- 账户资产: `okx_get_balances`
+- 下单: `okx_place_order`
+- 撤单: `okx_cancel_order`
+- 挂单列表: `okx_get_open_orders`
+- 历史订单: `okx_get_order_history`
+
 ### 自动化
 - 每日简报: `get_daily_brief`, `generate_daily_brief`
 - 交易复盘: `generate_daily_review`, `generate_weekly_review`, `generate_monthly_review`, `generate_yearly_review`
@@ -105,6 +116,10 @@ log:
 | `LONGPORT_ACCESS_TOKEN` | LongBridge Access Token |
 | `LONGPORT_REGION` | 地区，可选 `cn` / `hk` / `us` |
 | `LONGPORT_LOG_LEVEL` | LongBridge SDK 日志级别，可选 `debug` / `info` / `warn` / `error` |
+| `OKX_API_KEY` | OKX API Key |
+| `OKX_SECRET_KEY` | OKX Secret Key |
+| `OKX_PASSPHRASE` | OKX API Passphrase |
+| `OKX_BASE_URL` | OKX 基础域名，可选，默认 `https://www.okx.com` |
 
 说明:
 - LongBridge 底层 WebSocket 偶发 `close 1006 / unexpected EOF` 后自动重连是常见现象

@@ -25,6 +25,14 @@ signal_alert:
 execution_window:
   enabled: true
 
+# OKX Configuration (加密货币交易/行情)
+okx:
+  enabled: false
+  api_key: ""
+  secret_key: ""
+  passphrase: ""
+  base_url: "https://www.okx.com"  # 可选，默认即可
+
 # Feishu Configuration (飞书机器人通知)
 feishu:
   enabled: false

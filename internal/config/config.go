@@ -12,6 +12,7 @@ type Config struct {
 	AccessToken string       `yaml:"access_token"`
 	Region      string       `yaml:"region"`
 	Server      ServerConfig `yaml:"server"`
+	Okx         *OkxConfig   `yaml:"okx"`
 
 	// Backward-compatible legacy server fields.
 	ServerHost string `yaml:"host"`
@@ -56,6 +57,15 @@ type ExecutionWindowConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+// OkxConfig holds OKX API credentials and options
+type OkxConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	APIKey     string `yaml:"api_key"`
+	SecretKey  string `yaml:"secret_key"`
+	Passphrase string `yaml:"passphrase"`
+	BaseURL    string `yaml:"base_url"`
+}
+
 // LogConfig holds logging configuration
 type LogConfig struct {
 	Level string `yaml:"level"` // debug, info, warn, error
@@ -91,6 +101,22 @@ func Load(path string) (*Config, error) {
 		cfg.AccessToken = os.Getenv("LONGPORT_ACCESS_TOKEN")
 	}
 
+	// OKX env fallbacks
+	if cfg.Okx != nil {
+		if cfg.Okx.APIKey == "" {
+			cfg.Okx.APIKey = os.Getenv("OKX_API_KEY")
+		}
+		if cfg.Okx.SecretKey == "" {
+			cfg.Okx.SecretKey = os.Getenv("OKX_SECRET_KEY")
+		}
+		if cfg.Okx.Passphrase == "" {
+			cfg.Okx.Passphrase = os.Getenv("OKX_PASSPHRASE")
+		}
+		if cfg.Okx.BaseURL == "" {
+			cfg.Okx.BaseURL = os.Getenv("OKX_BASE_URL")
+		}
+	}
+
 	// Set environment variables for LongBridge SDK
 	if cfg.AppKey != "" {
 		os.Setenv("LONGPORT_APP_KEY", cfg.AppKey)
@@ -106,6 +132,21 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Log != nil && cfg.Log.Level != "" {
 		os.Setenv("LONGPORT_LOG_LEVEL", cfg.Log.Level)
+	}
+	// Set OKX env for downstream libraries / debugging
+	if cfg.Okx != nil {
+		if cfg.Okx.APIKey != "" {
+			os.Setenv("OKX_API_KEY", cfg.Okx.APIKey)
+		}
+		if cfg.Okx.SecretKey != "" {
+			os.Setenv("OKX_SECRET_KEY", cfg.Okx.SecretKey)
+		}
+		if cfg.Okx.Passphrase != "" {
+			os.Setenv("OKX_PASSPHRASE", cfg.Okx.Passphrase)
+		}
+		if cfg.Okx.BaseURL != "" {
+			os.Setenv("OKX_BASE_URL", cfg.Okx.BaseURL)
+		}
 	}
 
 	// Set defaults
@@ -159,6 +200,11 @@ func Load(path string) (*Config, error) {
 		cfg.Log = &LogConfig{
 			Level: "info",
 		}
+	}
+
+	// Set OKX defaults
+	if cfg.Okx == nil {
+		cfg.Okx = &OkxConfig{Enabled: false}
 	}
 
 	return &cfg, nil

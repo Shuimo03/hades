@@ -219,10 +219,10 @@ func analyzeTrendPeriod(ctx context.Context, lb *longbridge.Client, symbol, peri
 	period := parsePeriod(periodLabel)
 	candles, err := lb.GetCandlesticks(ctx, symbol, period, lookback)
 	if err != nil {
-		return trendSnapshot{}, fmt.Errorf("failed to get candlesticks for %s (%s): %v", symbol, periodLabel, err)
+		return unavailableTrendSnapshot(symbol, periodLabel, fmt.Sprintf("K线数据暂不可用: %v", err)), nil
 	}
 	if len(candles) < 20 {
-		return trendSnapshot{}, fmt.Errorf("not enough candlestick data for %s (%s)", symbol, periodLabel)
+		return unavailableTrendSnapshot(symbol, periodLabel, "K线数据不足，暂时无法完成趋势分析"), nil
 	}
 
 	sanitized := make([]*quote.Candlestick, 0, len(candles))
@@ -232,7 +232,7 @@ func analyzeTrendPeriod(ctx context.Context, lb *longbridge.Client, symbol, peri
 		}
 	}
 	if len(sanitized) < 20 {
-		return trendSnapshot{}, fmt.Errorf("not enough candlestick data for %s (%s)", symbol, periodLabel)
+		return unavailableTrendSnapshot(symbol, periodLabel, "有效K线数据不足，暂时无法完成趋势分析"), nil
 	}
 
 	sort.Slice(sanitized, func(i, j int) bool {
@@ -339,6 +339,21 @@ func analyzeTrendPeriod(ctx context.Context, lb *longbridge.Client, symbol, peri
 	}, nil
 }
 
+func unavailableTrendSnapshot(symbol, periodLabel, reason string) trendSnapshot {
+	return trendSnapshot{
+		Period:      periodLabel,
+		Trend:       "neutral",
+		Score:       50,
+		Signals:     []string{},
+		Risks:       []string{fmt.Sprintf("%s %s: %s", symbol, periodLabel, reason)},
+		LastClose:   0,
+		Support:     0,
+		Resistance:  0,
+		ChangePct:   0,
+		VolumeRatio: 0,
+	}
+}
+
 func parseTrendPeriods(raw interface{}) []string {
 	periods := splitStringArg(raw)
 	if len(periods) == 0 {
@@ -401,6 +416,10 @@ func combineMessages(snapshots []trendSnapshot) ([]string, []string) {
 }
 
 func buildTrendSuggestion(trend string, score int, signals, risks []string) string {
+	if hasUnavailableTrendData(signals, risks) {
+		return "部分周期K线数据暂不可用，当前仅能给出有限趋势判断。"
+	}
+
 	switch trend {
 	case "bullish":
 		if score >= 75 {
@@ -418,6 +437,10 @@ func buildTrendSuggestion(trend string, score int, signals, risks []string) stri
 }
 
 func buildPositionSuggestion(trend string, score int, risks []string) string {
+	if hasUnavailableTrendData(nil, risks) {
+		return "部分周期K线数据暂不可用，先按仓位和止损计划管理持仓。"
+	}
+
 	switch trend {
 	case "bullish":
 		if score >= 75 {
@@ -432,6 +455,20 @@ func buildPositionSuggestion(trend string, score int, risks []string) string {
 	default:
 		return "持仓走势中性，适合结合成本价和计划仓位继续观察。"
 	}
+}
+
+func hasUnavailableTrendData(signals, risks []string) bool {
+	for _, item := range signals {
+		if strings.Contains(item, "K线数据") {
+			return true
+		}
+	}
+	for _, item := range risks {
+		if strings.Contains(item, "K线数据") {
+			return true
+		}
+	}
+	return false
 }
 
 func trendSnapshotsToMaps(snapshots []trendSnapshot) []map[string]interface{} {
