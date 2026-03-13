@@ -86,7 +86,7 @@ func (n *FeishuNotifier) getAccessToken(ctx context.Context) (string, error) {
 }
 
 func (n *FeishuNotifier) sendMessage(ctx context.Context, token, title, message string) error {
-	url := "https://open.feishu.cn/open-apis/im/v1/messages"
+	url := "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
 
 	// Build rich text message
 	content := map[string]interface{}{
@@ -95,14 +95,13 @@ func (n *FeishuNotifier) sendMessage(ctx context.Context, token, title, message 
 	contentJSON, _ := json.Marshal(content)
 
 	body := map[string]interface{}{
-		"receive_id":      n.userID,
-		"receive_id_type": "open_id",
-		"msg_type":        "text",
-		"content":         string(contentJSON),
+		"receive_id": n.userID,
+		"msg_type":   "text",
+		"content":    string(contentJSON),
 	}
 
 	data, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}

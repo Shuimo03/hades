@@ -42,10 +42,11 @@ func NewTradingDigestTool(lb *longbridge.Client) func(ctx context.Context, args 
 			digest["portfolio_risk"] = result
 		}
 
-		symbols := splitStringArg(args["symbols"])
-		if len(symbols) > 0 {
+		if _, ok := args["symbols"]; ok || args["group_name"] != nil || args["group_id"] != nil {
 			planResult, err := NewWatchlistPlanTool(lb)(ctx, map[string]interface{}{
-				"symbols":    strings.Join(symbols, ","),
+				"symbols":    args["symbols"],
+				"group_name": args["group_name"],
+				"group_id":   args["group_id"],
 				"news_count": args["news_count"],
 				"lookback":   args["lookback"],
 			})

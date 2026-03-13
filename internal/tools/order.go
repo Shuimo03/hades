@@ -212,6 +212,55 @@ func NewHistoryExecutionsTool(lb *longbridge.Client) func(ctx context.Context, a
 	}
 }
 
+func NewTodayExecutionsTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+		var symbol string
+		if symbolI, ok := args["symbol"]; ok {
+			symbol, _ = symbolI.(string)
+		}
+
+		var orderID string
+		if orderIDI, ok := args["order_id"]; ok {
+			orderID, _ = orderIDI.(string)
+		}
+
+		executions, err := lb.GetTodayExecutions(ctx, symbol, orderID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get today executions: %v", err)
+		}
+		if executions == nil || len(executions) == 0 {
+			return map[string]interface{}{"result": "暂无今日成交记录"}, nil
+		}
+
+		items := make([]map[string]interface{}, 0, len(executions))
+		for _, e := range executions {
+			if e == nil {
+				continue
+			}
+			items = append(items, map[string]interface{}{
+				"trade_done_at":         e.TradeDoneAt.Format("2006-01-02 15:04:05"),
+				"trade_done_at_unix_ms": e.TradeDoneAt.UnixMilli(),
+				"symbol":                e.Symbol,
+				"order_id":              e.OrderId,
+				"quantity":              fmt.Sprintf("%v", e.Quantity),
+				"price":                 fmt.Sprintf("%v", e.Price),
+			})
+		}
+
+		return map[string]interface{}{
+			"result": map[string]interface{}{
+				"summary": fmt.Sprintf("共 %d 笔今日成交记录", len(items)),
+				"query": map[string]interface{}{
+					"symbol":   symbol,
+					"order_id": orderID,
+				},
+				"count": len(items),
+				"items": items,
+			},
+		}, nil
+	}
+}
+
 func parseOrderType(t string) trade.OrderType {
 	switch t {
 	case "LO", "lo", "limit":

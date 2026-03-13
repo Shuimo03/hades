@@ -19,6 +19,7 @@
 - 当日订单: `get_orders`
 - 订单详情: `get_order_detail`
 - 历史成交: `get_history_executions`
+- 今日成交: `get_today_executions`
 
 ### 加密货币 (OKX)
 - 币对行情: `okx_get_ticker`
@@ -65,7 +66,7 @@ go build -o bin/server ./cmd/server
 默认地址:
 
 ```text
-http://localhost:8080/mcp/
+http://localhost:8080/mcp
 ```
 
 ## 配置
@@ -127,13 +128,13 @@ log:
 
 ## MCP 协议说明
 
-当前服务通过 HTTP 暴露 JSON-RPC 风格的 MCP 接口。
+当前服务使用标准 MCP Streamable HTTP transport，可直接接入支持 MCP 的客户端，例如 Codex、Claude Code。
 
-已实现的方法:
-- `initialize`
-- `ping`
-- `tools/list`
-- `tools/call`
+Codex 示例:
+
+```bash
+codex mcp add hades --url http://localhost:8080/mcp
+```
 
 ## 工具清单
 
@@ -145,16 +146,17 @@ log:
 | `get_trades` | `symbol`, `start`, `end`, `count` | 实时成交，支持时间过滤 |
 | `get_candlesticks` | `symbol`, `period`, `count`, `size`, `start`, `end` | K 线，支持区间查询 |
 | `get_stock_news` | `symbol`, `count` | 获取个股相关新闻资讯 |
-| `generate_watchlist_plan` | `symbols`, `news_count`, `lookback` | 结合周K/日K和资讯生成关注股计划 |
+| `generate_watchlist_plan` | `symbols/group_name/group_id`, `news_count`, `lookback` | 结合周K/日K和资讯生成关注股计划 |
+| `get_watchlist_groups` | 无 | 获取券商关注组及组内标的 |
 | `analyze_trend` | `symbol`, `periods`, `lookback` | 单标的走势分析 |
-| `analyze_watchlist_trends` | `symbols`, `periods`, `lookback` | 批量走势分析 |
+| `analyze_watchlist_trends` | `symbols/group_name/group_id`, `periods`, `lookback` | 批量走势分析 |
 | `analyze_positions_trends` | `periods`, `lookback` | 当前持仓走势体检，附带浮动盈亏 |
 | `analyze_portfolio_risk` | 无 | 分析当前组合集中度、弱势仓位和风险动作 |
 | `generate_daily_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成日复盘 |
 | `generate_weekly_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成周复盘 |
 | `generate_monthly_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成月复盘 |
 | `generate_yearly_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成年复盘 |
-| `generate_trading_digest` | `period`, `symbols`, `news_count`, `lookback`, `timezone`, `start`, `end` | 生成交易摘要、组合风险和行动清单 |
+| `generate_trading_digest` | `period`, `symbols/group_name/group_id`, `news_count`, `lookback`, `timezone`, `start`, `end` | 生成交易摘要、组合风险和行动清单 |
 | `get_account_info` | 无 | 账户余额与现金信息 |
 | `get_positions` | 无 | 当前持仓，附带最新价和浮动盈亏 |
 | `submit_order` | `symbol`, `order_type`, `side`, `quantity`, `price`, `time_in_force` | 提交订单 |
@@ -162,6 +164,7 @@ log:
 | `get_orders` | `status` | 当日订单，可按状态过滤 |
 | `get_order_detail` | `order_id` | 订单详情 |
 | `get_history_executions` | `symbol`, `start`, `end` | 历史成交 |
+| `get_today_executions` | `symbol`, `order_id` | 当前交易日成交，避免本地自然日时区歧义 |
 | `get_daily_brief` | `version`, `symbols` | 每日简报 |
 | `generate_daily_brief` | `version`, `symbols` | `get_daily_brief` 别名 |
 | `create_signal_alert` | `symbol`, `alert_type`, `condition`, `threshold`, `note` | 创建提醒 |
@@ -185,6 +188,10 @@ log:
 - `start`, `end`: Unix 毫秒时间戳
 - 传 `start/end` 时优先走 LongBridge 历史 K 线区间接口
 
+### `get_today_executions`
+- 走 LongBridge `TodayExecutions` 接口，表示券商定义的“当前交易日”
+- 适合查询“今天成交了什么”，避免用 `get_history_executions + 本地 00:00` 造成美股跨时区误判
+
 ### `analyze_trend`
 - `periods` 默认: `1d,1h,15m`
 - `lookback` 默认: `120`
@@ -195,12 +202,18 @@ log:
 - 输出标题、摘要、链接、发布时间和互动数据
 
 ### `generate_watchlist_plan`
+- 支持 `symbols` 或 `group_name/group_id`
 - 自动结合周K和日K趋势
 - 输出 `buy_zone_low`、`buy_zone_high`、`stop_loss`、`take_profit`
 - 附带近期资讯摘要，适合做下周关注计划
 
+### `get_watchlist_groups`
+- 返回券商关注组列表，以及每个组内的证券清单
+- 可配合 `group_name/group_id` 给 watchlist 相关工具直接选组
+
 ### `analyze_watchlist_trends`
 - `symbols`: 多股票代码，逗号分隔
+- 或传 `group_name/group_id` 直接读取券商关注组
 - 会返回按 `score` 降序排序的结果列表
 
 ### `analyze_positions_trends`

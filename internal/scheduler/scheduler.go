@@ -31,9 +31,12 @@ type Scheduler struct {
 }
 
 // New creates a new scheduler
-func New() *Scheduler {
+func New(location *time.Location) *Scheduler {
+	if location == nil {
+		location = time.Local
+	}
 	return &Scheduler{
-		cron: cron.New(cron.WithParser(cronParser)),
+		cron: cron.New(cron.WithParser(cronParser), cron.WithLocation(location)),
 		jobs: make(map[string]cron.EntryID),
 	}
 }

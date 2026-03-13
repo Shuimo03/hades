@@ -64,9 +64,11 @@ func (c *Client) Close() {
 
 // Quote API
 
-// GetQuote returns real-time quotes
-func (c *Client) GetQuote(ctx context.Context, symbols []string) ([]*quote.Quote, error) {
-	return c.quoteCtx.RealtimeQuote(ctx, symbols)
+// GetQuote returns pull-based real-time quotes.
+// RealtimeQuote only reads the local subscription cache and returns empty values
+// when the symbol has not been subscribed first.
+func (c *Client) GetQuote(ctx context.Context, symbols []string) ([]*quote.SecurityQuote, error) {
+	return c.quoteCtx.Quote(ctx, symbols)
 }
 
 // GetQuoteInfo returns static info for securities
@@ -88,12 +90,12 @@ func (c *Client) GetStockNews(ctx context.Context, symbol string) ([]*StockNewsI
 
 // GetDepth returns depth data
 func (c *Client) GetDepth(ctx context.Context, symbol string) (*quote.SecurityDepth, error) {
-	return c.quoteCtx.RealtimeDepth(ctx, symbol)
+	return c.quoteCtx.Depth(ctx, symbol)
 }
 
 // GetTrades returns trade data
 func (c *Client) GetTrades(ctx context.Context, symbol string, count int32) ([]*quote.Trade, error) {
-	return c.quoteCtx.RealtimeTrades(ctx, symbol)
+	return c.quoteCtx.Trades(ctx, symbol, count)
 }
 
 // GetCandlesticks returns candlestick data
@@ -123,6 +125,15 @@ func (c *Client) GetOrders(ctx context.Context, status []trade.OrderStatus) ([]*
 		Status: status,
 	}
 	return c.tradeCtx.TodayOrders(ctx, params)
+}
+
+// GetTodayExecutions returns today's executions for the current trading day.
+func (c *Client) GetTodayExecutions(ctx context.Context, symbol, orderID string) ([]*trade.Execution, error) {
+	params := &trade.GetTodayExecutions{
+		Symbol:  symbol,
+		OrderId: orderID,
+	}
+	return c.tradeCtx.TodayExecutions(ctx, params)
 }
 
 func (c *Client) GetHistoryOrders(ctx context.Context, symbol string, status []trade.OrderStatus, startAt, endAt time.Time) ([]*trade.Order, bool, error) {

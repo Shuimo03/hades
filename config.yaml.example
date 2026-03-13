@@ -19,7 +19,16 @@ daily_brief:
 signal_alert:
   enabled: true
   check_interval: 60          # 检查间隔（秒）
+  timezone: "Asia/Shanghai"
+  session_start: "21:30"      # 仅在美股盘中检查提醒
+  session_end: "04:00"
   webhook_url: ""             # Slack/钉钉 Webhook
+
+review_schedule:
+  enabled: true
+  timezone: "Asia/Shanghai"
+  daily_review_time: "07:30"  # 每日复盘，默认周二到周六发送
+  weekly_review_time: "08:30" # 周复盘，默认周六发送
 
 # Execution Window Configuration
 execution_window:

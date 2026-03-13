@@ -148,14 +148,15 @@ func NewTradesTool(lb *longbridge.Client) func(ctx context.Context, args map[str
 			if t == nil {
 				continue
 			}
-			if hasStart && t.Timestamp < startMillis {
+			tradeMillis := timestampToMillis(t.Timestamp)
+			if hasStart && tradeMillis < startMillis {
 				continue
 			}
-			if hasEnd && t.Timestamp > endMillis {
+			if hasEnd && tradeMillis > endMillis {
 				continue
 			}
 			filtered = append(filtered, fmt.Sprintf("时间: %s, 价格: %s, 成交量: %d",
-				time.UnixMilli(t.Timestamp).Format("2006-01-02 15:04:05"), t.Price, t.Volume))
+				time.UnixMilli(tradeMillis).Format("2006-01-02 15:04:05"), t.Price, t.Volume))
 			if len(filtered) >= count {
 				break
 			}

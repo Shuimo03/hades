@@ -24,6 +24,9 @@ type Config struct {
 	// Signal Alert Configuration
 	SignalAlert *SignalAlertConfig `yaml:"signal_alert"`
 
+	// Review Schedule Configuration
+	ReviewSchedule *ReviewScheduleConfig `yaml:"review_schedule"`
+
 	// Execution Window Configuration
 	ExecutionWindow *ExecutionWindowConfig `yaml:"execution_window"`
 
@@ -51,6 +54,16 @@ type SignalAlertConfig struct {
 	Enabled       bool   `yaml:"enabled"`
 	CheckInterval int    `yaml:"check_interval"`
 	WebhookURL    string `yaml:"webhook_url"`
+	Timezone      string `yaml:"timezone"`
+	SessionStart  string `yaml:"session_start"`
+	SessionEnd    string `yaml:"session_end"`
+}
+
+type ReviewScheduleConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	Timezone         string `yaml:"timezone"`
+	DailyReviewTime  string `yaml:"daily_review_time"`
+	WeeklyReviewTime string `yaml:"weekly_review_time"`
 }
 
 type ExecutionWindowConfig struct {
@@ -178,6 +191,38 @@ func Load(path string) (*Config, error) {
 		cfg.SignalAlert = &SignalAlertConfig{
 			Enabled:       true,
 			CheckInterval: 60,
+			Timezone:      "Asia/Shanghai",
+			SessionStart:  "21:30",
+			SessionEnd:    "04:00",
+		}
+	} else {
+		if cfg.SignalAlert.Timezone == "" {
+			cfg.SignalAlert.Timezone = "Asia/Shanghai"
+		}
+		if cfg.SignalAlert.SessionStart == "" {
+			cfg.SignalAlert.SessionStart = "21:30"
+		}
+		if cfg.SignalAlert.SessionEnd == "" {
+			cfg.SignalAlert.SessionEnd = "04:00"
+		}
+	}
+
+	if cfg.ReviewSchedule == nil {
+		cfg.ReviewSchedule = &ReviewScheduleConfig{
+			Enabled:          true,
+			Timezone:         "Asia/Shanghai",
+			DailyReviewTime:  "07:30",
+			WeeklyReviewTime: "08:30",
+		}
+	} else {
+		if cfg.ReviewSchedule.Timezone == "" {
+			cfg.ReviewSchedule.Timezone = "Asia/Shanghai"
+		}
+		if cfg.ReviewSchedule.DailyReviewTime == "" {
+			cfg.ReviewSchedule.DailyReviewTime = "07:30"
+		}
+		if cfg.ReviewSchedule.WeeklyReviewTime == "" {
+			cfg.ReviewSchedule.WeeklyReviewTime = "08:30"
 		}
 	}
 

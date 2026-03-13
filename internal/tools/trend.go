@@ -78,9 +78,9 @@ func NewTrendAnalysisTool(lb *longbridge.Client) func(ctx context.Context, args 
 
 func NewWatchlistTrendAnalysisTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
-		symbols := splitSymbolsFromArgs(args["symbols"])
-		if len(symbols) == 0 {
-			return nil, fmt.Errorf("missing or invalid symbols parameter")
+		symbols, source, err := resolveSymbolsFromArgs(ctx, lb, args)
+		if err != nil {
+			return nil, err
 		}
 
 		periods := parseTrendPeriods(args["periods"])
@@ -128,6 +128,7 @@ func NewWatchlistTrendAnalysisTool(lb *longbridge.Client) func(ctx context.Conte
 			"result": map[string]interface{}{
 				"analysis_of": "watchlist_trends",
 				"count":       len(items),
+				"source":      source,
 				"items":       items,
 			},
 		}, nil

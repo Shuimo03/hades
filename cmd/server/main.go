@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,6 +45,8 @@ func main() {
 		log.Fatal("Missing required configuration: app_key, app_secret, access_token")
 	}
 
+	scheduleLocation := loadLocationOrLocal(preferredScheduleTimezone(cfg))
+
 	// Create LongBridge client
 	lb, err := longbridge.NewClient(cfg.AppKey, cfg.AppSecret, cfg.AccessToken)
 	if err != nil {
@@ -63,7 +66,7 @@ func main() {
 	}
 
 	// Create scheduler
-	sched := scheduler.New()
+	sched := scheduler.New(scheduleLocation)
 
 	// Create alert manager
 	alertMgr := alerts.New(lb, "data/alerts.json", time.Duration(cfg.SignalAlert.CheckInterval)*time.Second)
@@ -158,9 +161,57 @@ func main() {
 		}
 	}
 
+	// Setup scheduled reviews
+	if cfg.ReviewSchedule != nil && cfg.ReviewSchedule.Enabled {
+		reviewTimezone := cfg.ReviewSchedule.Timezone
+		dailyReviewTool := tools.NewDailyReviewTool(lb)
+		weeklyReviewTool := tools.NewWeeklyReviewTool(lb)
+
+		if spec, err := weekdayRangeTimeSpec(cfg.ReviewSchedule.DailyReviewTime, "2-6"); err != nil {
+			log.Printf("[Review] Invalid daily review schedule %q: %v", cfg.ReviewSchedule.DailyReviewTime, err)
+		} else if err := sched.AddJob("daily_review", spec, func(ctx context.Context) {
+			result, err := dailyReviewTool(ctx, map[string]interface{}{
+				"timezone": reviewTimezone,
+				"periods":  "1d,4h,1h",
+				"lookback": 120,
+			})
+			if err != nil {
+				log.Printf("[Review] Daily review failed: %v", err)
+				return
+			}
+			notifier.Notify(ctx, "Daily Review - 每日复盘", formatScheduledReviewMessage(result))
+		}); err != nil {
+			log.Printf("[Review] Failed to add daily review job: %v", err)
+		}
+
+		if spec, err := weekdayRangeTimeSpec(cfg.ReviewSchedule.WeeklyReviewTime, "6"); err != nil {
+			log.Printf("[Review] Invalid weekly review schedule %q: %v", cfg.ReviewSchedule.WeeklyReviewTime, err)
+		} else if err := sched.AddJob("weekly_review", spec, func(ctx context.Context) {
+			result, err := weeklyReviewTool(ctx, map[string]interface{}{
+				"timezone": reviewTimezone,
+				"periods":  "1d,4h,1h",
+				"lookback": 120,
+			})
+			if err != nil {
+				log.Printf("[Review] Weekly review failed: %v", err)
+				return
+			}
+			notifier.Notify(ctx, "Weekly Review - 周复盘", formatScheduledReviewMessage(result))
+		}); err != nil {
+			log.Printf("[Review] Failed to add weekly review job: %v", err)
+		}
+	}
+
 	// Setup signal alert checker
 	if cfg.SignalAlert.Enabled {
+		alertWindow, err := newClockWindowChecker(cfg.SignalAlert.Timezone, cfg.SignalAlert.SessionStart, cfg.SignalAlert.SessionEnd)
+		if err != nil {
+			log.Printf("[Alerts] Invalid trading window %s-%s: %v", cfg.SignalAlert.SessionStart, cfg.SignalAlert.SessionEnd, err)
+		}
 		if err := sched.AddJob("signal_alert_check", fmt.Sprintf("@every %ds", cfg.SignalAlert.CheckInterval), func(ctx context.Context) {
+			if alertWindow != nil && !alertWindow(time.Now()) {
+				return
+			}
 			alertMgr.CheckAll(ctx)
 		}); err != nil {
 			log.Printf("[Alerts] Failed to add signal alert job: %v", err)
@@ -296,6 +347,14 @@ func main() {
 				"type":        "string",
 				"description": "股票代码，逗号分隔，如: AAPL.US,TSLA.US,1810.HK",
 			},
+			"group_name": map[string]interface{}{
+				"type":        "string",
+				"description": "关注组名称，如: us, hk, 半导体",
+			},
+			"group_id": map[string]interface{}{
+				"type":        "string",
+				"description": "关注组 ID，如: 2522760",
+			},
 			"news_count": map[string]interface{}{
 				"type":        "integer",
 				"description": "每只股票附带的资讯数量，默认3",
@@ -306,6 +365,11 @@ func main() {
 			},
 		},
 	}, tools.NewWatchlistPlanTool(lb))
+
+	server.AddTool("get_watchlist_groups", "获取关注组列表", map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}, tools.NewWatchlistGroupsTool(lb))
 
 	trendAnalysisSchema := map[string]interface{}{
 		"type": "object",
@@ -332,6 +396,14 @@ func main() {
 			"symbols": map[string]interface{}{
 				"type":        "string",
 				"description": "股票代码，逗号分隔，如: AAPL.US,TSLA.US,700.HK",
+			},
+			"group_name": map[string]interface{}{
+				"type":        "string",
+				"description": "关注组名称，如: us, hk, 半导体",
+			},
+			"group_id": map[string]interface{}{
+				"type":        "string",
+				"description": "关注组 ID，如: 2522760",
 			},
 			"periods": map[string]interface{}{
 				"type":        "string",
@@ -475,6 +547,14 @@ func main() {
 				"type":        "string",
 				"description": "关注股代码，逗号分隔，可选",
 			},
+			"group_name": map[string]interface{}{
+				"type":        "string",
+				"description": "关注组名称，如: us, hk, 半导体",
+			},
+			"group_id": map[string]interface{}{
+				"type":        "string",
+				"description": "关注组 ID，如: 2522760",
+			},
 			"news_count": map[string]interface{}{
 				"type":        "integer",
 				"description": "每只关注股附带的资讯数量，默认3",
@@ -588,6 +668,20 @@ func main() {
 			},
 		},
 	}, tools.NewHistoryExecutionsTool(lb))
+
+	server.AddTool("get_today_executions", "查询今日成交", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"symbol": map[string]interface{}{
+				"type":        "string",
+				"description": "股票代码(可选)",
+			},
+			"order_id": map[string]interface{}{
+				"type":        "string",
+				"description": "订单ID(可选)",
+			},
+		},
+	}, tools.NewTodayExecutionsTool(lb))
 
 	// Register OKX tools (crypto)
 	if okxClient != nil {
@@ -808,12 +902,13 @@ func main() {
 	}, tools.NewDeleteExecutionWindowTool(execWindowMgr, sched))
 
 	// Setup HTTP handler
+	http.Handle("/mcp", server)
 	http.Handle("/mcp/", server)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("MCP server starting on %s", addr)
-	log.Printf("MCP endpoint: http://%s/mcp/", addr)
+	log.Printf("MCP endpoint: http://%s/mcp", addr)
 
 	go func() {
 		if err := http.ListenAndServe(addr, nil); err != nil {
@@ -831,9 +926,127 @@ func main() {
 }
 
 func weekdayTimeSpec(hhmm string) (string, error) {
+	return weekdayRangeTimeSpec(hhmm, "1-5")
+}
+
+func weekdayRangeTimeSpec(hhmm string, dow string) (string, error) {
 	parsed, err := time.Parse("15:04", hhmm)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%d %d * * 1-5", parsed.Minute(), parsed.Hour()), nil
+	return fmt.Sprintf("%d %d * * %s", parsed.Minute(), parsed.Hour(), dow), nil
+}
+
+func loadLocationOrLocal(timezone string) *time.Location {
+	if strings.TrimSpace(timezone) == "" {
+		return time.Local
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.Printf("[Scheduler] Invalid timezone %s, using local", timezone)
+		return time.Local
+	}
+	return location
+}
+
+func preferredScheduleTimezone(cfg *config.Config) string {
+	if cfg.ReviewSchedule != nil && strings.TrimSpace(cfg.ReviewSchedule.Timezone) != "" {
+		return cfg.ReviewSchedule.Timezone
+	}
+	if cfg.DailyBrief != nil && strings.TrimSpace(cfg.DailyBrief.Timezone) != "" {
+		return cfg.DailyBrief.Timezone
+	}
+	if cfg.SignalAlert != nil && strings.TrimSpace(cfg.SignalAlert.Timezone) != "" {
+		return cfg.SignalAlert.Timezone
+	}
+	return "Asia/Shanghai"
+}
+
+func newClockWindowChecker(timezone, startHHMM, endHHMM string) (func(time.Time) bool, error) {
+	location := loadLocationOrLocal(timezone)
+	startMinute, err := minutesOfDay(startHHMM)
+	if err != nil {
+		return nil, err
+	}
+	endMinute, err := minutesOfDay(endHHMM)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(now time.Time) bool {
+		localNow := now.In(location)
+		minuteOfDay := localNow.Hour()*60 + localNow.Minute()
+		if startMinute <= endMinute {
+			return minuteOfDay >= startMinute && minuteOfDay <= endMinute
+		}
+		return minuteOfDay >= startMinute || minuteOfDay <= endMinute
+	}, nil
+}
+
+func minutesOfDay(hhmm string) (int, error) {
+	parsed, err := time.Parse("15:04", hhmm)
+	if err != nil {
+		return 0, err
+	}
+	return parsed.Hour()*60 + parsed.Minute(), nil
+}
+
+func formatScheduledReviewMessage(result map[string]interface{}) string {
+	payload, _ := result["result"].(map[string]interface{})
+	if payload == nil {
+		return "复盘结果为空"
+	}
+
+	var sections []string
+	if summary, _ := payload["summary"].(string); strings.TrimSpace(summary) != "" {
+		sections = append(sections, summary)
+	}
+
+	if risks := extractStringSlice(payload["risks"]); len(risks) > 0 {
+		limit := minInt(len(risks), 3)
+		lines := make([]string, 0, limit+1)
+		lines = append(lines, "风险提示")
+		for _, risk := range risks[:limit] {
+			lines = append(lines, "- "+risk)
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	}
+
+	if periodMap, _ := payload["period"].(map[string]interface{}); periodMap != nil {
+		start, _ := periodMap["start"].(string)
+		end, _ := periodMap["end"].(string)
+		if start != "" || end != "" {
+			sections = append(sections, fmt.Sprintf("复盘区间\n- %s ~ %s", start, end))
+		}
+	}
+
+	if len(sections) == 0 {
+		return "复盘已生成，但没有可展示的摘要。"
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func extractStringSlice(raw interface{}) []string {
+	switch value := raw.(type) {
+	case []string:
+		return value
+	case []interface{}:
+		result := make([]string, 0, len(value))
+		for _, item := range value {
+			text, ok := item.(string)
+			if ok && strings.TrimSpace(text) != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

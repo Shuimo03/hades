@@ -258,7 +258,7 @@ func (m *Manager) CheckAll(ctx context.Context) {
 
 // checkAlert checks a single alert
 func (m *Manager) checkAlert(ctx context.Context, alert *Alert, securityQuote interface{}) {
-	q, ok := securityQuote.(*quote.Quote)
+	q, ok := securityQuote.(*quote.SecurityQuote)
 	if !ok || q == nil {
 		return
 	}
@@ -285,7 +285,7 @@ func (m *Manager) checkAlert(ctx context.Context, alert *Alert, securityQuote in
 	}
 }
 
-func (m *Manager) checkPriceAlert(alert *Alert, q *quote.Quote) string {
+func (m *Manager) checkPriceAlert(alert *Alert, q *quote.SecurityQuote) string {
 	if q.LastDone == nil {
 		return ""
 	}
@@ -306,7 +306,7 @@ func (m *Manager) checkPriceAlert(alert *Alert, q *quote.Quote) string {
 	return ""
 }
 
-func (m *Manager) checkVolatilityAlert(alert *Alert, q *quote.Quote) string {
+func (m *Manager) checkVolatilityAlert(alert *Alert, q *quote.SecurityQuote) string {
 	if q.High == nil || q.Low == nil || q.Open == nil {
 		return ""
 	}
@@ -329,7 +329,7 @@ func (m *Manager) checkVolatilityAlert(alert *Alert, q *quote.Quote) string {
 	return ""
 }
 
-func (m *Manager) checkVolumeAlert(ctx context.Context, alert *Alert, q *quote.Quote) string {
+func (m *Manager) checkVolumeAlert(ctx context.Context, alert *Alert, q *quote.SecurityQuote) string {
 	candles, err := m.lb.GetCandlesticks(ctx, alert.Symbol, quote.Period(1), 20)
 	if err != nil || len(candles) < 2 {
 		return ""
@@ -372,7 +372,7 @@ func (m *Manager) checkVolumeAlert(ctx context.Context, alert *Alert, q *quote.Q
 	return ""
 }
 
-func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q *quote.Quote) string {
+func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q *quote.SecurityQuote) string {
 	if q.LastDone == nil {
 		return ""
 	}

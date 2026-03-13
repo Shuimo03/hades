@@ -62,9 +62,9 @@ func NewStockNewsTool(lb *longbridge.Client) func(ctx context.Context, args map[
 
 func NewWatchlistPlanTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
 	return func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
-		symbols := splitStringArg(args["symbols"])
-		if len(symbols) == 0 {
-			return nil, fmt.Errorf("missing or invalid symbols parameter")
+		symbols, source, err := resolveSymbolsFromArgs(ctx, lb, args)
+		if err != nil {
+			return nil, err
 		}
 
 		newsCount, hasNewsCount, err := parseOptionalInt(args["news_count"])
@@ -115,6 +115,7 @@ func NewWatchlistPlanTool(lb *longbridge.Client) func(ctx context.Context, args 
 			"result": map[string]interface{}{
 				"analysis_of": "watchlist_plan",
 				"count":       len(items),
+				"source":      source,
 				"items":       items,
 			},
 		}, nil

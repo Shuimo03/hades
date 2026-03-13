@@ -83,14 +83,14 @@ func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args m
 			if c == nil {
 				continue
 			}
-			if hasStart && c.Timestamp < startMillis {
+			candleMillis := timestampToMillis(c.Timestamp)
+			if hasStart && candleMillis < startMillis {
 				continue
 			}
-			if hasEnd && c.Timestamp > endMillis {
+			if hasEnd && candleMillis > endMillis {
 				continue
 			}
-			// Timestamp is in milliseconds
-			t := time.Unix(c.Timestamp/1000, 0)
+			t := time.UnixMilli(candleMillis)
 			result = append(result, map[string]interface{}{
 				"datetime": t.Format("2006-01-02 15:04:05"),
 				"open":     c.Open,
@@ -116,29 +116,36 @@ func timePointerOrNil(unixMillis int64, ok bool) *time.Time {
 	return &t
 }
 
+func timestampToMillis(ts int64) int64 {
+	if ts > 1_000_000_000_000 {
+		return ts
+	}
+	return ts * 1000
+}
+
 func parsePeriod(p string) quote.Period {
 	switch p {
 	case "1m", "1min":
-		return quote.Period(3) // 1 minute
+		return quote.PeriodOneMinute
 	case "5m", "5min":
-		return quote.Period(4) // 5 minutes
+		return quote.PeriodFiveMinute
 	case "15m", "15min":
-		return quote.Period(5) // 15 minutes
+		return quote.PeriodFifteenMinute
 	case "30m", "30min":
-		return quote.Period(6) // 30 minutes
+		return quote.PeriodThirtyMinute
 	case "1h", "1hour":
-		return quote.Period(7) // 1 hour
+		return quote.PeriodSixtyMinute
 	case "2h", "2hour":
-		return quote.Period(8) // 2 hours
+		return quote.PeriodSixtyMinute
 	case "4h", "4hour":
-		return quote.Period(9) // 4 hours
+		return quote.PeriodSixtyMinute
 	case "1d", "day", "daily":
-		return quote.Period(1) // 1 day
+		return quote.PeriodDay
 	case "1w", "week", "weekly":
-		return quote.Period(2) // 1 week (changed from 10)
+		return quote.PeriodWeek
 	case "1M", "month", "monthly":
-		return quote.Period(11) // 1 month
+		return quote.PeriodMonth
 	default:
-		return quote.Period(1)
+		return quote.PeriodDay
 	}
 }

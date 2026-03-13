@@ -46,7 +46,7 @@ func buildPositionSnapshots(ctx context.Context, lb *longbridge.Client) ([]posit
 		return nil, fmt.Errorf("failed to get quotes for positions: %v", err)
 	}
 
-	quoteMap := make(map[string]*quote.Quote, len(quotes))
+	quoteMap := make(map[string]*quote.SecurityQuote, len(quotes))
 	for _, item := range quotes {
 		if item == nil {
 			continue
