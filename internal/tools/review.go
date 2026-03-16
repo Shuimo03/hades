@@ -193,6 +193,10 @@ func buildPositionsReview(ctx context.Context, lb *longbridge.Client, args map[s
 	if lookback < 30 {
 		lookback = 30
 	}
+	tradeSession, err := parseTradeSessionArg(args["trade_session"])
+	if err != nil {
+		return nil, err
+	}
 
 	snapshotsWithPnL, err := buildPositionSnapshots(ctx, lb)
 	if err != nil {
@@ -205,7 +209,7 @@ func buildPositionsReview(ctx context.Context, lb *longbridge.Client, args map[s
 
 		snapshots := make([]trendSnapshot, 0, len(periods))
 		for _, periodLabel := range periods {
-			snapshot, err := analyzeTrendPeriod(ctx, lb, position.Symbol, periodLabel, lookback)
+			snapshot, err := analyzeTrendPeriod(ctx, lb, position.Symbol, periodLabel, lookback, tradeSession)
 			if err != nil {
 				return nil, err
 			}

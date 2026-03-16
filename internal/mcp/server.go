@@ -25,10 +25,16 @@ type HTTPServer struct {
 }
 
 func NewHTTPServer(name, version string) *HTTPServer {
+	return NewHTTPServerWithInstructions(name, version, "")
+}
+
+func NewHTTPServerWithInstructions(name, version, instructions string) *HTTPServer {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{
 		Name:    name,
 		Version: version,
-	}, nil)
+	}, &sdkmcp.ServerOptions{
+		Instructions: instructions,
+	})
 
 	if DebugMode {
 		server.AddReceivingMiddleware(debugMiddleware)
@@ -67,6 +73,10 @@ func (s *HTTPServer) AddTool(name, description string, schema map[string]interfa
 
 		return toolSuccessResult(result), nil
 	})
+}
+
+func (s *HTTPServer) AddPrompt(prompt *sdkmcp.Prompt, handler sdkmcp.PromptHandler) {
+	s.server.AddPrompt(prompt, handler)
 }
 
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {

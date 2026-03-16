@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hades/internal/longbridge"
+	"time"
 )
 
 func NewAccountInfoTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
@@ -73,6 +74,9 @@ func NewPositionsTool(lb *longbridge.Client) func(ctx context.Context, args map[
 				"unrealized_pnl":     snapshot.UnrealizedPnL,
 				"unrealized_pnl_pct": snapshot.UnrealizedPnLPct,
 				"has_quote":          snapshot.HasQuote,
+				"price_session":      snapshot.PriceSession,
+				"price_timestamp":    snapshot.PriceTimestamp,
+				"price_time":         formatQuoteTimestamp(snapshot.PriceTimestamp),
 			})
 		}
 
@@ -84,4 +88,11 @@ func NewPositionsTool(lb *longbridge.Client) func(ctx context.Context, args map[
 			},
 		}, nil
 	}
+}
+
+func formatQuoteTimestamp(ts int64) string {
+	if ts <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ts).Format("2006-01-02 15:04:05")
 }

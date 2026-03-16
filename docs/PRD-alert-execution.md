@@ -117,6 +117,7 @@
   - condition: string (必填, "above" | "below" | "cross_up" | "cross_down")
   - threshold: number (必填, 触发阈值)
   - note: string (可选, 备注)
+  - session_scope: string (可选, "regular" | "extended"，留空则继承全局配置)
 
 工具名: list_signal_alerts
 参数: (无)

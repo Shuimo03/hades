@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/longportapp/openapi-go/quote"
 	"hades/internal/longbridge"
+	"hades/internal/planlevels"
 )
 
 func NewStockNewsTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
@@ -85,11 +87,11 @@ func NewWatchlistPlanTool(lb *longbridge.Client) func(ctx context.Context, args 
 
 		items := make([]map[string]interface{}, 0, len(symbols))
 		for _, symbol := range symbols {
-			weekly, err := analyzeTrendPeriod(ctx, lb, symbol, "1w", 60)
+			weekly, err := analyzeTrendPeriod(ctx, lb, symbol, "1w", 60, quote.CandlestickTradeSessionNormal)
 			if err != nil {
 				return nil, err
 			}
-			daily, err := analyzeTrendPeriod(ctx, lb, symbol, "1d", lookback)
+			daily, err := analyzeTrendPeriod(ctx, lb, symbol, "1d", lookback, quote.CandlestickTradeSessionNormal)
 			if err != nil {
 				return nil, err
 			}
@@ -123,9 +125,9 @@ func NewWatchlistPlanTool(lb *longbridge.Client) func(ctx context.Context, args 
 }
 
 func buildWatchlistPlanItem(symbol string, weekly, daily trendSnapshot, overallTrend string, overallScore int, signals, risks []string, newsItems []*longbridge.StockNewsItem, newsCount int) map[string]interface{} {
-	buyZoneLow, buyZoneHigh := buildBuyZone(overallTrend, daily.Support, weekly.Support, daily.LastClose)
-	stopLoss := buildStopLoss(daily.Support, weekly.Support, daily.LastClose)
-	takeProfit := buildTakeProfit(daily.Resistance, weekly.Resistance, daily.LastClose)
+	buyZoneLow, buyZoneHigh := planlevels.BuyZone(overallTrend, daily.LastClose, daily.Support, weekly.Support)
+	stopLoss := planlevels.StopLoss(overallTrend, daily.LastClose, daily.Support, weekly.Support)
+	takeProfit := planlevels.TakeProfit(daily.LastClose, daily.Resistance, weekly.Resistance)
 	action := buildActionPlan(overallTrend, overallScore, daily.LastClose, buyZoneHigh, stopLoss, takeProfit)
 
 	topNews := make([]map[string]interface{}, 0, min(newsCount, len(newsItems)))
@@ -196,38 +198,6 @@ func summarizeNewsHeadline(item *longbridge.StockNewsItem) string {
 		}
 	}
 	return "资讯: " + title
-}
-
-func buildBuyZone(trend string, dailySupport, weeklySupport, lastClose float64) (float64, float64) {
-	support := minNonZero(dailySupport, weeklySupport)
-	if support == 0 {
-		return round2(lastClose * 0.98), round2(lastClose * 1.01)
-	}
-
-	switch trend {
-	case "bullish":
-		return round2(support * 0.995), round2(support * 1.02)
-	case "neutral":
-		return round2(support * 0.99), round2(support * 1.01)
-	default:
-		return round2(support * 0.97), round2(support * 0.99)
-	}
-}
-
-func buildStopLoss(dailySupport, weeklySupport, lastClose float64) float64 {
-	support := minNonZero(dailySupport, weeklySupport)
-	if support == 0 {
-		return round2(lastClose * 0.95)
-	}
-	return round2(support * 0.97)
-}
-
-func buildTakeProfit(dailyResistance, weeklyResistance, lastClose float64) float64 {
-	resistance := maxNonZero(dailyResistance, weeklyResistance)
-	if resistance == 0 {
-		return round2(lastClose * 1.08)
-	}
-	return round2(resistance * 0.99)
 }
 
 func buildActionPlan(trend string, score int, lastClose, buyZoneHigh, stopLoss, takeProfit float64) string {

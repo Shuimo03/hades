@@ -42,26 +42,43 @@ func NewCreateSignalAlertTool(lb *longbridge.Client, mgr *alerts.Manager) func(c
 			note = n
 		}
 
+		sessionScope := ""
+		if rawScope, exists := args["session_scope"]; exists && rawScope != nil {
+			scope, ok := rawScope.(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid session_scope parameter")
+			}
+			scope = strings.TrimSpace(scope)
+			if scope != "" {
+				if _, valid := longbridge.ParseQuoteSessionScope(scope); !valid {
+					return nil, fmt.Errorf("invalid session_scope parameter: %s", scope)
+				}
+				sessionScope = scope
+			}
+		}
+
 		if alerts.AlertType(alertTypeStr) != alerts.AlertTypeTrend && threshold == 0 {
 			return nil, fmt.Errorf("missing threshold parameter")
 		}
 
 		alert := &alerts.Alert{
-			Symbol:    symbol,
-			AlertType: alerts.AlertType(alertTypeStr),
-			Condition: alerts.AlertCondition(conditionStr),
-			Threshold: threshold,
-			Note:      note,
-			Enabled:   true,
+			Symbol:       symbol,
+			AlertType:    alerts.AlertType(alertTypeStr),
+			Condition:    alerts.AlertCondition(conditionStr),
+			Threshold:    threshold,
+			SessionScope: sessionScope,
+			Note:         note,
+			Enabled:      true,
 		}
 
 		if err := mgr.Create(alert); err != nil {
 			return nil, fmt.Errorf("failed to create alert: %v", err)
 		}
 
+		effectiveScope := mgr.QuoteScopeForAlert(alert)
 		return map[string]interface{}{
-			"result": fmt.Sprintf("提醒创建成功: %s %s %s %.2f",
-				alert.Symbol, alert.Condition, alert.AlertType, alert.Threshold),
+			"result": fmt.Sprintf("提醒创建成功: %s %s %s %.2f | 时段=%s",
+				alert.Symbol, alert.Condition, alert.AlertType, alert.Threshold, effectiveScope),
 		}, nil
 	}
 }
@@ -87,8 +104,8 @@ func NewListSignalAlertsTool(mgr *alerts.Manager) func(ctx context.Context, args
 				status = "[TRIGGERED]"
 			}
 
-			sb.WriteString(fmt.Sprintf("%s %s | %s | %s | %.2f\n",
-				status, a.Symbol, a.AlertType, a.Condition, a.Threshold))
+			sb.WriteString(fmt.Sprintf("%s %s | %s | %s | %.2f | 时段=%s\n",
+				status, a.Symbol, a.AlertType, a.Condition, a.Threshold, mgr.QuoteScopeForAlert(a)))
 			if a.Note != "" {
 				sb.WriteString(fmt.Sprintf("   备注: %s\n", a.Note))
 			}

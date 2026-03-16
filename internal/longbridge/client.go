@@ -103,8 +103,39 @@ func (c *Client) GetCandlesticks(ctx context.Context, symbol string, period quot
 	return c.quoteCtx.Candlesticks(ctx, symbol, period, count, quote.AdjustTypeNo)
 }
 
+func (c *Client) GetCandlesticksWithTradeSession(ctx context.Context, symbol string, period quote.Period, count int32, tradeSession quote.CandlestickTradeSession) ([]*quote.Candlestick, error) {
+	if tradeSession == quote.CandlestickTradeSessionNormal {
+		return c.GetCandlesticks(ctx, symbol, period, count)
+	}
+	return c.quoteCtx.HistoryCandlesticksByOffset(
+		ctx,
+		symbol,
+		period,
+		quote.AdjustTypeNo,
+		false,
+		nil,
+		count,
+		quote.CandlestickRequestTradeSession(tradeSession),
+	)
+}
+
 func (c *Client) GetHistoryCandlesticksByDate(ctx context.Context, symbol string, period quote.Period, startDate, endDate *time.Time) ([]*quote.Candlestick, error) {
 	return c.quoteCtx.HistoryCandlesticksByDate(ctx, symbol, period, quote.AdjustTypeNo, startDate, endDate)
+}
+
+func (c *Client) GetHistoryCandlesticksByDateWithTradeSession(ctx context.Context, symbol string, period quote.Period, startDate, endDate *time.Time, tradeSession quote.CandlestickTradeSession) ([]*quote.Candlestick, error) {
+	if tradeSession == quote.CandlestickTradeSessionNormal {
+		return c.GetHistoryCandlesticksByDate(ctx, symbol, period, startDate, endDate)
+	}
+	return c.quoteCtx.HistoryCandlesticksByDate(
+		ctx,
+		symbol,
+		period,
+		quote.AdjustTypeNo,
+		startDate,
+		endDate,
+		quote.CandlestickRequestTradeSession(tradeSession),
+	)
 }
 
 // Trade API

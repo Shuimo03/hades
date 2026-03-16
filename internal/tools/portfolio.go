@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/longportapp/openapi-go/quote"
 	"hades/internal/longbridge"
 )
 
@@ -38,11 +39,11 @@ func NewPortfolioRiskTool(lb *longbridge.Client) func(ctx context.Context, args 
 				losingCount++
 			}
 
-			daily, err := analyzeTrendPeriod(ctx, lb, snapshot.Position.Symbol, "1d", 120)
+			daily, err := analyzeTrendPeriod(ctx, lb, snapshot.Position.Symbol, "1d", 120, quote.CandlestickTradeSessionNormal)
 			if err != nil {
 				return nil, err
 			}
-			hourly, err := analyzeTrendPeriod(ctx, lb, snapshot.Position.Symbol, "1h", 120)
+			hourly, err := analyzeTrendPeriod(ctx, lb, snapshot.Position.Symbol, "1h", 120, quote.CandlestickTradeSessionNormal)
 			if err != nil {
 				return nil, err
 			}

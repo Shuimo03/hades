@@ -20,8 +20,9 @@ signal_alert:
   enabled: true
   check_interval: 60          # 检查间隔（秒）
   timezone: "Asia/Shanghai"
-  session_start: "21:30"      # 仅在美股盘中检查提醒
-  session_end: "04:00"
+  session_scope: "extended"   # extended: 盘前/盘后/夜盘也检查, regular: 仅常规盘
+  session_start: "21:30"      # regular 模式下生效
+  session_end: "04:00"        # regular 模式下生效
   webhook_url: ""             # Slack/钉钉 Webhook
 
 review_schedule:

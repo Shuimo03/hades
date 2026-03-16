@@ -93,6 +93,7 @@ daily_brief:
 signal_alert:
   enabled: true
   check_interval: 60
+  session_scope: "extended"
   webhook_url: ""
 
 execution_window:
@@ -144,19 +145,19 @@ codex mcp add hades --url http://localhost:8080/mcp
 | `get_quote_info` | `symbols` | 股票基本信息 |
 | `get_depth` | `symbol` | 买卖盘深度 |
 | `get_trades` | `symbol`, `start`, `end`, `count` | 实时成交，支持时间过滤 |
-| `get_candlesticks` | `symbol`, `period`, `count`, `size`, `start`, `end` | K 线，支持区间查询 |
+| `get_candlesticks` | `symbol`, `period`, `count`, `size`, `start`, `end`, `trade_session` | K 线，支持区间查询 |
 | `get_stock_news` | `symbol`, `count` | 获取个股相关新闻资讯 |
 | `generate_watchlist_plan` | `symbols/group_name/group_id`, `news_count`, `lookback` | 结合周K/日K和资讯生成关注股计划 |
 | `get_watchlist_groups` | 无 | 获取券商关注组及组内标的 |
-| `analyze_trend` | `symbol`, `periods`, `lookback` | 单标的走势分析 |
-| `analyze_watchlist_trends` | `symbols/group_name/group_id`, `periods`, `lookback` | 批量走势分析 |
-| `analyze_positions_trends` | `periods`, `lookback` | 当前持仓走势体检，附带浮动盈亏 |
+| `analyze_trend` | `symbol`, `periods`, `lookback`, `trade_session` | 单标的走势分析 |
+| `analyze_watchlist_trends` | `symbols/group_name/group_id`, `periods`, `lookback`, `trade_session` | 批量走势分析 |
+| `analyze_positions_trends` | `periods`, `lookback`, `trade_session` | 当前持仓走势体检，附带浮动盈亏 |
 | `analyze_portfolio_risk` | 无 | 分析当前组合集中度、弱势仓位和风险动作 |
-| `generate_daily_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成日复盘 |
-| `generate_weekly_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成周复盘 |
-| `generate_monthly_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成月复盘 |
-| `generate_yearly_review` | `start`, `end`, `timezone`, `periods`, `lookback` | 生成年复盘 |
-| `generate_trading_digest` | `period`, `symbols/group_name/group_id`, `news_count`, `lookback`, `timezone`, `start`, `end` | 生成交易摘要、组合风险和行动清单 |
+| `generate_daily_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成日复盘 |
+| `generate_weekly_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成周复盘 |
+| `generate_monthly_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成月复盘 |
+| `generate_yearly_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成年复盘 |
+| `generate_trading_digest` | `period`, `symbols/group_name/group_id`, `news_count`, `lookback`, `timezone`, `start`, `end`, `trade_session` | 生成交易摘要、组合风险和行动清单 |
 | `get_account_info` | 无 | 账户余额与现金信息 |
 | `get_positions` | 无 | 当前持仓，附带最新价和浮动盈亏 |
 | `submit_order` | `symbol`, `order_type`, `side`, `quantity`, `price`, `time_in_force` | 提交订单 |
@@ -167,7 +168,7 @@ codex mcp add hades --url http://localhost:8080/mcp
 | `get_today_executions` | `symbol`, `order_id` | 当前交易日成交，避免本地自然日时区歧义 |
 | `get_daily_brief` | `version`, `symbols` | 每日简报 |
 | `generate_daily_brief` | `version`, `symbols` | `get_daily_brief` 别名 |
-| `create_signal_alert` | `symbol`, `alert_type`, `condition`, `threshold`, `note` | 创建提醒 |
+| `create_signal_alert` | `symbol`, `alert_type`, `condition`, `threshold`, `note`, `session_scope` | 创建提醒 |
 | `list_signal_alerts` | 无 | 列出提醒 |
 | `delete_signal_alert` | `alert_id` | 删除提醒 |
 | `enable_signal_alert` | `alert_id`, `enabled` | 启用/禁用提醒 |
@@ -186,6 +187,7 @@ codex mcp add hades --url http://localhost:8080/mcp
 - `period` 支持: `1m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `1d`, `1w`, `1M`
 - `count` 和 `size` 等价
 - `start`, `end`: Unix 毫秒时间戳
+- `trade_session` 可选: `regular`, `all`
 - 传 `start/end` 时优先走 LongBridge 历史 K 线区间接口
 
 ### `get_today_executions`
@@ -195,6 +197,7 @@ codex mcp add hades --url http://localhost:8080/mcp
 ### `analyze_trend`
 - `periods` 默认: `1d,1h,15m`
 - `lookback` 默认: `120`
+- `trade_session` 默认: `regular`
 - 输出: `trend`, `score`, `signals`, `risks`, `suggestion`, `support`, `resistance`
 
 ### `get_stock_news`
@@ -214,10 +217,12 @@ codex mcp add hades --url http://localhost:8080/mcp
 ### `analyze_watchlist_trends`
 - `symbols`: 多股票代码，逗号分隔
 - 或传 `group_name/group_id` 直接读取券商关注组
+- `trade_session` 默认: `regular`
 - 会返回按 `score` 降序排序的结果列表
 
 ### `analyze_positions_trends`
 - 自动读取当前持仓
+- `trade_session` 默认: `regular`
 - 对每个持仓输出趋势评分、信号、风险、最新价和浮动盈亏
 - 适合日/周复盘和飞书持仓体检
 
@@ -228,24 +233,29 @@ codex mcp add hades --url http://localhost:8080/mcp
 
 ### `generate_weekly_review`
 - 默认统计本周一 00:00 到当前时间
+- `trade_session` 默认: `regular`
 - 汇总账户快照、订单/成交统计、按股票的成交活跃度
 - 会附带当前持仓的趋势体检、持仓浮动盈亏、区间已实现盈亏和周内风险提示
 
 ### `generate_daily_review`
 - 默认统计当日 00:00 到当前时间
+- `trade_session` 默认: `regular`
 - 输出结构与周复盘一致，适合盘后日报
 - 已实现盈亏基于 FIFO 和历史成交重建，当前不含手续费
 
 ### `generate_monthly_review`
 - 默认统计本月 1 日 00:00 到当前时间
+- `trade_session` 默认: `regular`
 - 输出结构与周复盘一致，适合月度交易回顾
 
 ### `generate_yearly_review`
 - 默认统计当年 1 月 1 日 00:00 到当前时间
+- `trade_session` 默认: `regular`
 - 输出结构与周复盘一致，适合年度回顾
 
 ### `generate_trading_digest`
 - 把复盘、组合风险、关注股计划合并成一条摘要输出
+- `trade_session` 默认: `regular`
 - 适合 zeroClaw 直接调用，减少多次工具调用
 - 会给出 `action_items` 供日报/周报直接使用
 - 会额外返回 `execution_checklist`
@@ -268,9 +278,12 @@ codex mcp add hades --url http://localhost:8080/mcp
 ### `create_signal_alert`
 - `alert_type` 当前可用: `price`, `volatility`, `volume`, `trend`
 - `condition` 当前可用: `above`, `below`, `cross_up`, `cross_down`, `in_buy_zone`, `near_take_profit`, `below_stop_loss`
+- `session_scope` 可选: `regular`, `extended`
+- 留空时继承全局 `signal_alert.session_scope`
 - `trend + in_buy_zone` 可用于“到了买入区再提醒”
 - `trend + near_take_profit` 可用于“接近止盈位提前提醒”
 - `trend + below_stop_loss` 可用于“跌破计划止损位提醒”
+- `price` 和 `trend` 类型支持按提醒单独指定时段，适合把买入区、止盈、止损拆开配置
 - 触发后会附带当前价、关注买入区、止损位、止盈位和近期资讯摘要
 
 ### `create_execution_window`
@@ -638,7 +651,8 @@ codex mcp add hades --url http://localhost:8080/mcp
       "alert_type": "trend",
       "condition": "near_take_profit",
       "threshold": 1.5,
-      "note": "距离止盈位 1.5% 以内提醒我"
+      "note": "距离止盈位 1.5% 以内提醒我",
+      "session_scope": "extended"
     }
   }
 }
@@ -657,7 +671,8 @@ codex mcp add hades --url http://localhost:8080/mcp
       "symbol": "TSLA.US",
       "alert_type": "trend",
       "condition": "below_stop_loss",
-      "note": "跌破计划止损位就提醒我"
+      "note": "跌破计划止损位就提醒我",
+      "session_scope": "regular"
     }
   }
 }

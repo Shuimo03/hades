@@ -39,17 +39,18 @@ const (
 
 // Alert represents a signal alert
 type Alert struct {
-	ID          string         `json:"id"`
-	Symbol      string         `json:"symbol"`
-	AlertType   AlertType      `json:"alert_type"`
-	Condition   AlertCondition `json:"condition"`
-	Threshold   float64        `json:"threshold"`
-	Note        string         `json:"note,omitempty"`
-	Enabled     bool           `json:"enabled"`
-	CreatedAt   time.Time      `json:"created_at"`
-	LastCheck   time.Time      `json:"last_check,omitempty"`
-	Triggered   bool           `json:"triggered,omitempty"`
-	TriggeredAt time.Time      `json:"triggered_at,omitempty"`
+	ID           string         `json:"id"`
+	Symbol       string         `json:"symbol"`
+	AlertType    AlertType      `json:"alert_type"`
+	Condition    AlertCondition `json:"condition"`
+	Threshold    float64        `json:"threshold"`
+	SessionScope string         `json:"session_scope,omitempty"`
+	Note         string         `json:"note,omitempty"`
+	Enabled      bool           `json:"enabled"`
+	CreatedAt    time.Time      `json:"created_at"`
+	LastCheck    time.Time      `json:"last_check,omitempty"`
+	Triggered    bool           `json:"triggered,omitempty"`
+	TriggeredAt  time.Time      `json:"triggered_at,omitempty"`
 }
 
 // Manager manages signal alerts
@@ -57,16 +58,18 @@ type Manager struct {
 	mu            sync.RWMutex
 	alerts        map[string]*Alert
 	lb            *longbridge.Client
+	quoteScope    longbridge.QuoteSessionScope
 	checkInterval time.Duration
 	storagePath   string
 	callback      func(alert *Alert, message string) // callback when alert triggers
 }
 
 // New creates a new alert manager
-func New(lb *longbridge.Client, storagePath string, checkInterval time.Duration) *Manager {
+func New(lb *longbridge.Client, storagePath string, checkInterval time.Duration, quoteScope longbridge.QuoteSessionScope) *Manager {
 	return &Manager{
 		alerts:        make(map[string]*Alert),
 		lb:            lb,
+		quoteScope:    quoteScope,
 		checkInterval: checkInterval,
 		storagePath:   storagePath,
 	}
@@ -75,6 +78,15 @@ func New(lb *longbridge.Client, storagePath string, checkInterval time.Duration)
 // SetCallback sets the callback function for alert triggers
 func (m *Manager) SetCallback(fn func(alert *Alert, message string)) {
 	m.callback = fn
+}
+
+func (m *Manager) QuoteScopeForAlert(alert *Alert) longbridge.QuoteSessionScope {
+	if alert != nil {
+		if scope, valid := longbridge.ParseQuoteSessionScope(alert.SessionScope); valid && alert.SessionScope != "" {
+			return scope
+		}
+	}
+	return m.quoteScope
 }
 
 // Load loads alerts from storage
@@ -265,16 +277,24 @@ func (m *Manager) checkAlert(ctx context.Context, alert *Alert, securityQuote in
 
 	alert.LastCheck = time.Now()
 	message := ""
+	alertScope := m.QuoteScopeForAlert(alert)
+	effectiveQuote := longbridge.ResolveEffectiveQuote(q, alertScope)
 
 	switch alert.AlertType {
 	case AlertTypePrice:
-		message = m.checkPriceAlert(alert, q)
+		message = m.checkPriceAlert(alert, effectiveQuote)
 	case AlertTypeVolatility:
+		if effectiveQuote.Session != longbridge.QuoteSessionRegular {
+			return
+		}
 		message = m.checkVolatilityAlert(alert, q)
 	case AlertTypeVolume:
+		if effectiveQuote.Session != longbridge.QuoteSessionRegular {
+			return
+		}
 		message = m.checkVolumeAlert(ctx, alert, q)
 	case AlertTypeTrend:
-		message = m.checkTrendAlert(ctx, alert, q)
+		message = m.checkTrendAlert(ctx, alert, effectiveQuote)
 	}
 
 	if message != "" && m.callback != nil {
@@ -285,21 +305,22 @@ func (m *Manager) checkAlert(ctx context.Context, alert *Alert, securityQuote in
 	}
 }
 
-func (m *Manager) checkPriceAlert(alert *Alert, q *quote.SecurityQuote) string {
-	if q.LastDone == nil {
+func (m *Manager) checkPriceAlert(alert *Alert, q longbridge.EffectiveQuote) string {
+	if !q.HasQuote {
 		return ""
 	}
 
-	price, _ := q.LastDone.Float64()
+	price := q.Price
+	sessionName := longbridge.QuoteSessionDisplayName(q.Session)
 
 	switch alert.Condition {
 	case AlertConditionAbove:
 		if price > alert.Threshold {
-			return fmt.Sprintf("[价格提醒] %s 达到 %.2f (当前: %.2f)", alert.Symbol, alert.Threshold, price)
+			return fmt.Sprintf("[价格提醒][%s] %s 达到 %.2f (当前: %.2f)", sessionName, alert.Symbol, alert.Threshold, price)
 		}
 	case AlertConditionBelow:
 		if price < alert.Threshold {
-			return fmt.Sprintf("[价格提醒] %s 跌破 %.2f (当前: %.2f)", alert.Symbol, alert.Threshold, price)
+			return fmt.Sprintf("[价格提醒][%s] %s 跌破 %.2f (当前: %.2f)", sessionName, alert.Symbol, alert.Threshold, price)
 		}
 	}
 
@@ -372,22 +393,23 @@ func (m *Manager) checkVolumeAlert(ctx context.Context, alert *Alert, q *quote.S
 	return ""
 }
 
-func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q *quote.SecurityQuote) string {
-	if q.LastDone == nil {
+func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q longbridge.EffectiveQuote) string {
+	if !q.HasQuote {
 		return ""
 	}
 
-	metrics, err := buildAlertPlanMetrics(ctx, m.lb, alert.Symbol)
+	metrics, err := buildAlertPlanMetrics(ctx, m.lb, alert.Symbol, m.QuoteScopeForAlert(alert))
 	if err != nil {
 		return ""
 	}
 
-	price, _ := q.LastDone.Float64()
+	price := q.Price
+	sessionName := longbridge.QuoteSessionDisplayName(q.Session)
 	switch alert.Condition {
 	case AlertConditionInBuyZone:
 		if price >= metrics.BuyLow && price <= metrics.BuyHigh {
-			return fmt.Sprintf("[买入区提醒] %s 进入关注买入区 %.2f - %.2f (当前: %.2f)",
-				alert.Symbol, metrics.BuyLow, metrics.BuyHigh, price)
+			return fmt.Sprintf("[买入区提醒][%s] %s 进入关注买入区 %.2f - %.2f (当前: %.2f)",
+				sessionName, alert.Symbol, metrics.BuyLow, metrics.BuyHigh, price)
 		}
 	case AlertConditionNearTakeProfit:
 		bufferPct := alert.Threshold
@@ -396,23 +418,23 @@ func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q *quote.Se
 		}
 		triggerPrice := metrics.TakeProfit * (1 - bufferPct/100)
 		if metrics.IsHeld && price >= triggerPrice {
-			return fmt.Sprintf("[止盈提醒] %s 接近计划止盈位 %.2f (当前: %.2f, 提前 %.2f%% 提醒)",
-				alert.Symbol, metrics.TakeProfit, price, bufferPct)
+			return fmt.Sprintf("[止盈提醒][%s] %s 接近计划止盈位 %.2f (当前: %.2f, 提前 %.2f%% 提醒)",
+				sessionName, alert.Symbol, metrics.TakeProfit, price, bufferPct)
 		}
 	case AlertConditionBelowStopLoss:
 		if metrics.IsHeld && price <= metrics.StopLoss {
-			return fmt.Sprintf("[止损提醒] %s 跌破计划止损位 %.2f (当前: %.2f)",
-				alert.Symbol, metrics.StopLoss, price)
+			return fmt.Sprintf("[止损提醒][%s] %s 跌破计划止损位 %.2f (当前: %.2f)",
+				sessionName, alert.Symbol, metrics.StopLoss, price)
 		}
 	case AlertConditionCrossUp:
 		if price > metrics.BuyHigh {
-			return fmt.Sprintf("[趋势提醒] %s 向上脱离买入区，关注是否形成突破 (当前: %.2f)",
-				alert.Symbol, price)
+			return fmt.Sprintf("[趋势提醒][%s] %s 向上脱离买入区，关注是否形成突破 (当前: %.2f)",
+				sessionName, alert.Symbol, price)
 		}
 	case AlertConditionCrossDown:
 		if price < metrics.StopLoss {
-			return fmt.Sprintf("[趋势提醒] %s 跌破计划止损位 %.2f (当前: %.2f)",
-				alert.Symbol, metrics.StopLoss, price)
+			return fmt.Sprintf("[趋势提醒][%s] %s 跌破计划止损位 %.2f (当前: %.2f)",
+				sessionName, alert.Symbol, metrics.StopLoss, price)
 		}
 	}
 

@@ -15,6 +15,8 @@ type positionSnapshot struct {
 	AvailableQuantity float64
 	CostPrice         float64
 	LastPrice         float64
+	PriceSession      string
+	PriceTimestamp    int64
 	CostBasis         float64
 	MarketValue       float64
 	UnrealizedPnL     float64
@@ -64,10 +66,17 @@ func buildPositionSnapshots(ctx context.Context, lb *longbridge.Client) ([]posit
 		availableQuantity := parseStringFloat(position.AvailableQuantity)
 		costPrice := decimalToFloat(position.CostPrice)
 		lastPrice := costPrice
+		priceSession := ""
+		priceTimestamp := int64(0)
 		hasQuote := false
-		if item := quoteMap[position.Symbol]; item != nil && item.LastDone != nil {
-			lastPrice = decimalToFloat(item.LastDone)
-			hasQuote = true
+		if item := quoteMap[position.Symbol]; item != nil {
+			effectiveQuote := longbridge.ResolveEffectiveQuote(item, longbridge.QuoteSessionScopeExtended)
+			if effectiveQuote.HasQuote {
+				lastPrice = effectiveQuote.Price
+				priceSession = string(effectiveQuote.Session)
+				priceTimestamp = effectiveQuote.TimestampMillis
+				hasQuote = true
+			}
 		}
 
 		costBasis := quantity * costPrice
@@ -84,6 +93,8 @@ func buildPositionSnapshots(ctx context.Context, lb *longbridge.Client) ([]posit
 			AvailableQuantity: availableQuantity,
 			CostPrice:         round2(costPrice),
 			LastPrice:         round2(lastPrice),
+			PriceSession:      priceSession,
+			PriceTimestamp:    priceTimestamp,
 			CostBasis:         round2(costBasis),
 			MarketValue:       round2(marketValue),
 			UnrealizedPnL:     round2(unrealizedPnL),

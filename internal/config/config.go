@@ -55,6 +55,7 @@ type SignalAlertConfig struct {
 	CheckInterval int    `yaml:"check_interval"`
 	WebhookURL    string `yaml:"webhook_url"`
 	Timezone      string `yaml:"timezone"`
+	SessionScope  string `yaml:"session_scope"`
 	SessionStart  string `yaml:"session_start"`
 	SessionEnd    string `yaml:"session_end"`
 }
@@ -192,12 +193,16 @@ func Load(path string) (*Config, error) {
 			Enabled:       true,
 			CheckInterval: 60,
 			Timezone:      "Asia/Shanghai",
+			SessionScope:  "extended",
 			SessionStart:  "21:30",
 			SessionEnd:    "04:00",
 		}
 	} else {
 		if cfg.SignalAlert.Timezone == "" {
 			cfg.SignalAlert.Timezone = "Asia/Shanghai"
+		}
+		if cfg.SignalAlert.SessionScope == "" {
+			cfg.SignalAlert.SessionScope = "extended"
 		}
 		if cfg.SignalAlert.SessionStart == "" {
 			cfg.SignalAlert.SessionStart = "21:30"

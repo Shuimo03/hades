@@ -33,8 +33,29 @@ func NewQuoteTool(lb *longbridge.Client) func(ctx context.Context, args map[stri
 			if q == nil {
 				continue
 			}
-			result += fmt.Sprintf("%s: 最新价=%s, 开盘=%s, 最高=%s, 最低=%s, 成交量=%d\n",
-				q.Symbol, q.LastDone, q.Open, q.High, q.Low, q.Volume)
+			effectiveQuote := longbridge.ResolveEffectiveQuote(q, longbridge.QuoteSessionScopeExtended)
+			if !effectiveQuote.HasQuote {
+				result += fmt.Sprintf("%s: 未获取到可用行情\n", q.Symbol)
+				continue
+			}
+
+			openText := "-"
+			if effectiveQuote.HasOpen {
+				openText = fmt.Sprintf("%.2f", effectiveQuote.Open)
+			}
+			priceTime := formatQuoteTimestamp(effectiveQuote.TimestampMillis)
+			if priceTime == "" {
+				priceTime = "-"
+			}
+			result += fmt.Sprintf("%s: 最新价=%.2f, 时段=%s, 时间=%s, 开盘=%s, 最高=%.2f, 最低=%.2f, 成交量=%d\n",
+				q.Symbol,
+				effectiveQuote.Price,
+				longbridge.QuoteSessionDisplayName(effectiveQuote.Session),
+				priceTime,
+				openText,
+				effectiveQuote.High,
+				effectiveQuote.Low,
+				effectiveQuote.Volume)
 		}
 
 		return map[string]interface{}{"result": result}, nil

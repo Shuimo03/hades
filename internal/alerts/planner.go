@@ -9,18 +9,23 @@ import (
 
 	"github.com/longportapp/openapi-go/quote"
 	"hades/internal/longbridge"
+	"hades/internal/planlevels"
 )
 
-func BuildAlertPlanContext(ctx context.Context, lb *longbridge.Client, symbol string) string {
-	metrics, err := buildAlertPlanMetrics(ctx, lb, symbol)
+func BuildAlertPlanContext(ctx context.Context, lb *longbridge.Client, symbol string, scope longbridge.QuoteSessionScope) string {
+	metrics, err := buildAlertPlanMetrics(ctx, lb, symbol, scope)
 	if err != nil {
 		return ""
 	}
 
+	priceLabel := "当前价"
+	if metrics.CurrentPriceSession != "" {
+		priceLabel = fmt.Sprintf("当前价(%s)", longbridge.QuoteSessionDisplayName(metrics.CurrentPriceSession))
+	}
 	lines := []string{
 		"",
 		"交易计划参考:",
-		fmt.Sprintf("- 当前价: %.2f", round2(metrics.CurrentPrice)),
+		fmt.Sprintf("- %s: %.2f", priceLabel, round2(metrics.CurrentPrice)),
 		fmt.Sprintf("- 周期趋势: %s (评分: %d)", metrics.Trend, metrics.Score),
 		fmt.Sprintf("- 关注买入区: %.2f - %.2f", metrics.BuyLow, metrics.BuyHigh),
 		fmt.Sprintf("- 止损参考: %.2f", metrics.StopLoss),
@@ -50,16 +55,17 @@ func BuildAlertPlanContext(ctx context.Context, lb *longbridge.Client, symbol st
 }
 
 type AlertPlanMetrics struct {
-	CurrentPrice float64
-	Trend        string
-	Score        int
-	BuyLow       float64
-	BuyHigh      float64
-	StopLoss     float64
-	TakeProfit   float64
-	Action       string
-	IsHeld       bool
-	CostPrice    float64
+	CurrentPrice        float64
+	CurrentPriceSession longbridge.QuoteSession
+	Trend               string
+	Score               int
+	BuyLow              float64
+	BuyHigh             float64
+	StopLoss            float64
+	TakeProfit          float64
+	Action              string
+	IsHeld              bool
+	CostPrice           float64
 }
 
 type planSnapshot struct {
@@ -71,30 +77,35 @@ type planSnapshot struct {
 	PriceAbove60 bool
 }
 
-func buildAlertPlanMetrics(ctx context.Context, lb *longbridge.Client, symbol string) (*AlertPlanMetrics, error) {
+func buildAlertPlanMetrics(ctx context.Context, lb *longbridge.Client, symbol string, scope longbridge.QuoteSessionScope) (*AlertPlanMetrics, error) {
 	if strings.TrimSpace(symbol) == "" {
 		return nil, fmt.Errorf("missing symbol")
 	}
 
 	quotes, err := lb.GetQuote(ctx, []string{symbol})
-	if err != nil || len(quotes) == 0 || quotes[0] == nil || quotes[0].LastDone == nil {
+	if err != nil || len(quotes) == 0 || quotes[0] == nil {
+		return nil, fmt.Errorf("missing quote")
+	}
+	effectiveQuote := longbridge.ResolveEffectiveQuote(quotes[0], scope)
+	if !effectiveQuote.HasQuote {
 		return nil, fmt.Errorf("missing quote")
 	}
 
-	currentPrice, _ := quotes[0].LastDone.Float64()
-	daily, err := analyzePlanPeriod(ctx, lb, symbol, quote.PeriodDay, 120)
+	currentPrice := effectiveQuote.Price
+	tradeSession := longbridge.CandlestickTradeSessionFromScope(scope)
+	daily, err := analyzePlanPeriod(ctx, lb, symbol, quote.PeriodDay, 120, tradeSession)
 	if err != nil {
 		return nil, err
 	}
-	weekly, err := analyzePlanPeriod(ctx, lb, symbol, quote.PeriodWeek, 60)
+	weekly, err := analyzePlanPeriod(ctx, lb, symbol, quote.PeriodWeek, 60, tradeSession)
 	if err != nil {
 		return nil, err
 	}
 
 	trend, score := combinePlanTrend(daily, weekly)
-	buyLow, buyHigh := buildPlanBuyZone(trend, daily.Support, weekly.Support, currentPrice)
-	stopLoss := buildPlanStopLoss(daily.Support, weekly.Support, currentPrice)
-	takeProfit := buildPlanTakeProfit(daily.Resistance, weekly.Resistance, currentPrice)
+	buyLow, buyHigh := planlevels.BuyZone(trend, currentPrice, daily.Support, weekly.Support)
+	stopLoss := planlevels.StopLoss(trend, currentPrice, daily.Support, weekly.Support)
+	takeProfit := planlevels.TakeProfit(currentPrice, daily.Resistance, weekly.Resistance)
 
 	isHeld := false
 	costPrice := 0.0
@@ -118,21 +129,22 @@ func buildAlertPlanMetrics(ctx context.Context, lb *longbridge.Client, symbol st
 	}
 
 	return &AlertPlanMetrics{
-		CurrentPrice: round2(currentPrice),
-		Trend:        trend,
-		Score:        score,
-		BuyLow:       buyLow,
-		BuyHigh:      buyHigh,
-		StopLoss:     stopLoss,
-		TakeProfit:   takeProfit,
-		Action:       buildPlanAction(trend, score, currentPrice, buyHigh, stopLoss, takeProfit, isHeld, costPrice),
-		IsHeld:       isHeld,
-		CostPrice:    round2(costPrice),
+		CurrentPrice:        round2(currentPrice),
+		CurrentPriceSession: effectiveQuote.Session,
+		Trend:               trend,
+		Score:               score,
+		BuyLow:              buyLow,
+		BuyHigh:             buyHigh,
+		StopLoss:            stopLoss,
+		TakeProfit:          takeProfit,
+		Action:              buildPlanAction(trend, score, currentPrice, buyHigh, stopLoss, takeProfit, isHeld, costPrice),
+		IsHeld:              isHeld,
+		CostPrice:           round2(costPrice),
 	}, nil
 }
 
-func analyzePlanPeriod(ctx context.Context, lb *longbridge.Client, symbol string, period quote.Period, count int32) (planSnapshot, error) {
-	candles, err := lb.GetCandlesticks(ctx, symbol, period, count)
+func analyzePlanPeriod(ctx context.Context, lb *longbridge.Client, symbol string, period quote.Period, count int32, tradeSession quote.CandlestickTradeSession) (planSnapshot, error) {
+	candles, err := lb.GetCandlesticksWithTradeSession(ctx, symbol, period, count, tradeSession)
 	if err != nil {
 		return planSnapshot{}, err
 	}
@@ -198,37 +210,6 @@ func combinePlanTrend(daily, weekly planSnapshot) (string, int) {
 		return "bearish", score
 	}
 	return "neutral", score
-}
-
-func buildPlanBuyZone(trend string, dailySupport, weeklySupport, currentPrice float64) (float64, float64) {
-	support := minNonZeroFloat(dailySupport, weeklySupport)
-	if support == 0 {
-		return round2(currentPrice * 0.98), round2(currentPrice * 1.01)
-	}
-	switch trend {
-	case "bullish":
-		return round2(support * 0.995), round2(support * 1.02)
-	case "neutral":
-		return round2(support * 0.99), round2(support * 1.01)
-	default:
-		return round2(support * 0.97), round2(support * 0.99)
-	}
-}
-
-func buildPlanStopLoss(dailySupport, weeklySupport, currentPrice float64) float64 {
-	support := minNonZeroFloat(dailySupport, weeklySupport)
-	if support == 0 {
-		return round2(currentPrice * 0.95)
-	}
-	return round2(support * 0.97)
-}
-
-func buildPlanTakeProfit(dailyResistance, weeklyResistance, currentPrice float64) float64 {
-	resistance := maxNonZeroFloat(dailyResistance, weeklyResistance)
-	if resistance == 0 {
-		return round2(currentPrice * 1.08)
-	}
-	return round2(resistance * 0.99)
 }
 
 func buildPlanAction(trend string, score int, currentPrice, buyHigh, stopLoss, takeProfit float64, isHeld bool, costPrice float64) string {

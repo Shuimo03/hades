@@ -27,6 +27,10 @@ func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args m
 				period = parsePeriod(periodStr)
 			}
 		}
+		tradeSession, err := parseTradeSessionArg(args["trade_session"])
+		if err != nil {
+			return nil, err
+		}
 
 		startMillis, hasStart, err := parseOptionalInt64(args["start"])
 		if err != nil {
@@ -63,12 +67,12 @@ func NewCandlesticksTool(lb *longbridge.Client) func(ctx context.Context, args m
 			startDate := timePointerOrNil(startMillis, hasStart)
 			endDate := timePointerOrNil(endMillis, hasEnd)
 
-			candles, err = lb.GetHistoryCandlesticksByDate(ctx, symbol, period, startDate, endDate)
+			candles, err = lb.GetHistoryCandlesticksByDateWithTradeSession(ctx, symbol, period, startDate, endDate, tradeSession)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get history candlesticks: %v", err)
 			}
 		} else {
-			candles, err = lb.GetCandlesticks(ctx, symbol, period, count)
+			candles, err = lb.GetCandlesticksWithTradeSession(ctx, symbol, period, count, tradeSession)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get candlesticks: %v", err)
 			}
