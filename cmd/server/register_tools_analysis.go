@@ -116,7 +116,11 @@ func registerAnalysisTools(server *mcp.HTTPServer, lb *longbridge.Client) {
 	}
 
 	server.AddTool("generate_weekly_review", "生成周复盘", reviewSchema("开始时间戳(毫秒)，可选，默认本周一 00:00"), tools.NewWeeklyReviewTool(lb))
-	server.AddTool("generate_daily_review", "生成日复盘", reviewSchema("开始时间戳(毫秒)，可选，默认今日 00:00"), tools.NewDailyReviewTool(lb))
+	server.AddTool("generate_daily_review", "生成日复盘", reviewSchema("开始时间戳(毫秒)，可选，默认最近 24 小时"), tools.NewDailyReviewTool(lb))
+	server.AddTool("generate_exception_review", "生成波段例外复盘", map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}, tools.NewExceptionReviewTool(lb))
 	server.AddTool("generate_monthly_review", "生成月复盘", reviewSchema("开始时间戳(毫秒)，可选，默认本月 1 日 00:00"), tools.NewMonthlyReviewTool(lb))
 	server.AddTool("generate_yearly_review", "生成年复盘", reviewSchema("开始时间戳(毫秒)，可选，默认当年 1 月 1 日 00:00"), tools.NewYearlyReviewTool(lb))
 

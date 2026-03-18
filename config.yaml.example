@@ -2,6 +2,7 @@ app_key: ""       # LongBridge App Key
 app_secret: ""   # LongBridge App Secret
 access_token: "" # LongBridge Access Token
 region: "cn"     # Region: cn, us, hk (default: cn)
+trading_style: "swing" # swing: 波段优先; intraday: 日内/高频复盘
 
 server:
   host: "0.0.0.0"
@@ -28,7 +29,7 @@ signal_alert:
 review_schedule:
   enabled: true
   timezone: "Asia/Shanghai"
-  daily_review_time: "07:30"  # 每日复盘，默认周二到周六发送
+  daily_review_time: "07:30"  # swing 模式下作为例外复盘时间，intraday 模式下作为每日复盘时间
   weekly_review_time: "08:30" # 周复盘，默认周六发送
 
 # Execution Window Configuration

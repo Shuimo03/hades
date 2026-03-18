@@ -9,89 +9,87 @@ import (
 
 	"github.com/longportapp/openapi-go/quote"
 	"hades/internal/longbridge"
-	"hades/internal/planlevels"
 )
 
 func BuildAlertPlanContext(ctx context.Context, lb *longbridge.Client, symbol string, scope longbridge.QuoteSessionScope) string {
-	metrics, err := buildAlertPlanMetrics(ctx, lb, symbol, scope)
+	metrics, err := BuildAlertPlanMetrics(ctx, lb, symbol, scope)
 	if err != nil {
 		return ""
 	}
 
-	priceLabel := "当前价"
-	if metrics.CurrentPriceSession != "" {
-		priceLabel = fmt.Sprintf("当前价(%s)", longbridge.QuoteSessionDisplayName(metrics.CurrentPriceSession))
-	}
 	lines := []string{
 		"",
-		"交易计划参考:",
-		fmt.Sprintf("- %s: %.2f", priceLabel, round2(metrics.CurrentPrice)),
-		fmt.Sprintf("- 周期趋势: %s (评分: %d)", metrics.Trend, metrics.Score),
-		fmt.Sprintf("- 关注买入区: %.2f - %.2f", metrics.BuyLow, metrics.BuyHigh),
-		fmt.Sprintf("- 止损参考: %.2f", metrics.StopLoss),
-		fmt.Sprintf("- 止盈参考: %.2f", metrics.TakeProfit),
-		fmt.Sprintf("- 操作建议: %s", metrics.Action),
+		"交易计划:",
+		fmt.Sprintf("1. 当前模式: %s", metrics.ModeLabel),
+		fmt.Sprintf("2. 结论: %s", metrics.Conclusion),
+		fmt.Sprintf("3. 入场条件: %s", metrics.EntryCondition),
+		fmt.Sprintf("4. 失效条件: %s", metrics.InvalidationCondition),
+		fmt.Sprintf("5. 目标与 RR: %s", metrics.TargetSummary),
 	}
-	if metrics.IsHeld {
-		lines = append(lines, fmt.Sprintf("- 当前持仓成本: %.2f", metrics.CostPrice))
+	if details := metrics.PositionContext; strings.TrimSpace(details) != "" {
+		lines = append(lines, fmt.Sprintf("附注: %s", details))
 	}
-
-	if news, err := lb.GetStockNews(ctx, symbol); err == nil && len(news) > 0 {
-		lines = append(lines, "- 近期资讯:")
-		count := 0
-		for _, item := range news {
-			if item == nil || strings.TrimSpace(item.Title) == "" {
-				continue
-			}
-			lines = append(lines, fmt.Sprintf("  - %s", summarizeNews(item.Title, item.PublishedAt)))
-			count++
-			if count >= 2 {
-				break
-			}
-		}
+	if details := metrics.StatusReason; strings.TrimSpace(details) != "" {
+		lines = append(lines, fmt.Sprintf("状态: %s", details))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
 type AlertPlanMetrics struct {
-	CurrentPrice        float64
-	CurrentPriceSession longbridge.QuoteSession
-	Trend               string
-	Score               int
-	BuyLow              float64
-	BuyHigh             float64
-	StopLoss            float64
-	TakeProfit          float64
-	Action              string
-	IsHeld              bool
-	CostPrice           float64
+	CurrentPrice          float64
+	CurrentPriceSession   longbridge.QuoteSession
+	Trend                 string
+	Score                 int
+	Mode                  string
+	ModeLabel             string
+	Status                string
+	StatusReason          string
+	BuyLow                float64
+	BuyHigh               float64
+	StopLoss              float64
+	TakeProfit            float64
+	TakeProfit2           float64
+	RR                    float64
+	RRQualified           bool
+	Conclusion            string
+	EntryCondition        string
+	InvalidationCondition string
+	TargetSummary         string
+	BreakoutConfirm       float64
+	BreakoutExit          float64
+	ChaseLimit            float64
+	VolumeRequirement     string
+	EventRisk             bool
+	EventNotes            []string
+	Overextended          bool
+	PositionContext       string
+	Action                string
+	IsHeld                bool
+	CostPrice             float64
+	Daily                 map[string]interface{}
+	Weekly                map[string]interface{}
 }
 
 type planSnapshot struct {
 	LastClose    float64
+	MA10         float64
+	MA20         float64
+	MA60         float64
 	Support      float64
 	Resistance   float64
 	Score        int
+	ChangePct    float64
+	VolumeRatio  float64
 	PriceAbove20 bool
 	PriceAbove60 bool
 }
 
-func buildAlertPlanMetrics(ctx context.Context, lb *longbridge.Client, symbol string, scope longbridge.QuoteSessionScope) (*AlertPlanMetrics, error) {
+func BuildAlertPlanMetrics(ctx context.Context, lb *longbridge.Client, symbol string, scope longbridge.QuoteSessionScope) (*AlertPlanMetrics, error) {
 	if strings.TrimSpace(symbol) == "" {
 		return nil, fmt.Errorf("missing symbol")
 	}
 
-	quotes, err := lb.GetQuote(ctx, []string{symbol})
-	if err != nil || len(quotes) == 0 || quotes[0] == nil {
-		return nil, fmt.Errorf("missing quote")
-	}
-	effectiveQuote := longbridge.ResolveEffectiveQuote(quotes[0], scope)
-	if !effectiveQuote.HasQuote {
-		return nil, fmt.Errorf("missing quote")
-	}
-
-	currentPrice := effectiveQuote.Price
 	tradeSession := longbridge.CandlestickTradeSessionFromScope(scope)
 	daily, err := analyzePlanPeriod(ctx, lb, symbol, quote.PeriodDay, 120, tradeSession)
 	if err != nil {
@@ -102,10 +100,18 @@ func buildAlertPlanMetrics(ctx context.Context, lb *longbridge.Client, symbol st
 		return nil, err
 	}
 
+	effectiveQuote := longbridge.EffectiveQuote{}
+	quotes, err := lb.GetQuote(ctx, []string{symbol})
+	if err == nil && len(quotes) > 0 && quotes[0] != nil {
+		effectiveQuote = longbridge.ResolveEffectiveQuote(quotes[0], scope)
+	}
+
+	currentPrice := daily.LastClose
+	if effectiveQuote.HasQuote && effectiveQuote.Price > 0 {
+		currentPrice = effectiveQuote.Price
+	}
+
 	trend, score := combinePlanTrend(daily, weekly)
-	buyLow, buyHigh := planlevels.BuyZone(trend, currentPrice, daily.Support, weekly.Support)
-	stopLoss := planlevels.StopLoss(trend, currentPrice, daily.Support, weekly.Support)
-	takeProfit := planlevels.TakeProfit(currentPrice, daily.Resistance, weekly.Resistance)
 
 	isHeld := false
 	costPrice := 0.0
@@ -128,18 +134,45 @@ func buildAlertPlanMetrics(ctx context.Context, lb *longbridge.Client, symbol st
 		}
 	}
 
+	var news []*longbridge.StockNewsItem
+	if items, err := lb.GetStockNews(ctx, symbol); err == nil {
+		news = items
+	}
+	plan := deriveStrategyPlan(symbol, currentPrice, trend, score, daily, weekly, isHeld, costPrice, news)
+
 	return &AlertPlanMetrics{
-		CurrentPrice:        round2(currentPrice),
-		CurrentPriceSession: effectiveQuote.Session,
-		Trend:               trend,
-		Score:               score,
-		BuyLow:              buyLow,
-		BuyHigh:             buyHigh,
-		StopLoss:            stopLoss,
-		TakeProfit:          takeProfit,
-		Action:              buildPlanAction(trend, score, currentPrice, buyHigh, stopLoss, takeProfit, isHeld, costPrice),
-		IsHeld:              isHeld,
-		CostPrice:           round2(costPrice),
+		CurrentPrice:          round2(currentPrice),
+		CurrentPriceSession:   effectiveQuote.Session,
+		Trend:                 trend,
+		Score:                 score,
+		Mode:                  string(plan.Mode),
+		ModeLabel:             modeLabel(plan.Mode),
+		Status:                plan.Status,
+		StatusReason:          plan.StatusReason,
+		BuyLow:                plan.BuyLow,
+		BuyHigh:               plan.BuyHigh,
+		StopLoss:              plan.InvalPrice,
+		TakeProfit:            plan.TP1,
+		TakeProfit2:           plan.TP2,
+		RR:                    plan.RR,
+		RRQualified:           plan.RRQualified,
+		Conclusion:            plan.Conclusion,
+		EntryCondition:        plan.EntryCondition,
+		InvalidationCondition: plan.InvalCondition,
+		TargetSummary:         plan.TargetSummary,
+		BreakoutConfirm:       plan.BreakoutConfirm,
+		BreakoutExit:          plan.BreakoutExit,
+		ChaseLimit:            plan.ChaseLimit,
+		VolumeRequirement:     plan.VolumeRequirement,
+		EventRisk:             plan.EventRisk,
+		EventNotes:            plan.EventNotes,
+		Overextended:          plan.Overextended,
+		PositionContext:       plan.PositionSummary,
+		Action:                plan.Action,
+		IsHeld:                isHeld,
+		CostPrice:             round2(costPrice),
+		Daily:                 snapshotToMap(daily),
+		Weekly:                snapshotToMap(weekly),
 	}, nil
 }
 
@@ -167,10 +200,39 @@ func analyzePlanPeriod(ctx context.Context, lb *longbridge.Client, symbol string
 	}
 
 	lastClose := closes[len(closes)-1]
+	ma10 := averageFloat(closes[maxInt(0, len(closes)-10):])
 	ma20 := averageFloat(closes[maxInt(0, len(closes)-20):])
 	ma60 := averageFloat(closes[maxInt(0, len(closes)-minInt(len(closes), 60)):])
+	changeBaseIndex := maxInt(0, len(closes)-20)
+	changePct := 0.0
+	if base := closes[changeBaseIndex]; base > 0 {
+		changePct = (lastClose - base) / base * 100
+	}
 	support := minFloatSlice(lows[maxInt(0, len(lows)-20):])
 	resistance := maxFloatSlice(highs[maxInt(0, len(highs)-20):])
+	latestVolume := 0.0
+	if len(candles) > 0 {
+		latestVolume = float64(candles[len(candles)-1].Volume)
+	}
+	avgVolume20 := 0.0
+	if len(candles) > 0 {
+		totalVolume := 0.0
+		volumeSamples := 0
+		for _, candle := range candles[maxInt(0, len(candles)-20):] {
+			if candle == nil {
+				continue
+			}
+			totalVolume += float64(candle.Volume)
+			volumeSamples++
+		}
+		if volumeSamples > 0 {
+			avgVolume20 = totalVolume / float64(volumeSamples)
+		}
+	}
+	volumeRatio := 0.0
+	if avgVolume20 > 0 {
+		volumeRatio = latestVolume / avgVolume20
+	}
 
 	score := 50
 	priceAbove20 := lastClose > ma20
@@ -193,9 +255,14 @@ func analyzePlanPeriod(ctx context.Context, lb *longbridge.Client, symbol string
 
 	return planSnapshot{
 		LastClose:    round2(lastClose),
+		MA10:         round2(ma10),
+		MA20:         round2(ma20),
+		MA60:         round2(ma60),
 		Support:      round2(support),
 		Resistance:   round2(resistance),
 		Score:        clamp(score, 0, 100),
+		ChangePct:    round2(changePct),
+		VolumeRatio:  round2(volumeRatio),
 		PriceAbove20: priceAbove20,
 		PriceAbove60: priceAbove60,
 	}, nil
@@ -210,36 +277,6 @@ func combinePlanTrend(daily, weekly planSnapshot) (string, int) {
 		return "bearish", score
 	}
 	return "neutral", score
-}
-
-func buildPlanAction(trend string, score int, currentPrice, buyHigh, stopLoss, takeProfit float64, isHeld bool, costPrice float64) string {
-	if isHeld {
-		switch {
-		case currentPrice >= takeProfit:
-			return "已接近止盈位，优先考虑分批止盈或上移止损。"
-		case currentPrice <= stopLoss:
-			return "已逼近止损位，优先控制风险，避免继续拖延。"
-		case trend == "bearish":
-			return "你已持有该标的，走势转弱，优先考虑减仓或防守。"
-		case costPrice > 0 && currentPrice > costPrice:
-			return "仍在盈利区，可继续跟踪，但建议把止损抬到成本附近。"
-		default:
-			return "你已持有该标的，先按仓位计划管理，不建议再盲目加仓。"
-		}
-	}
-
-	switch {
-	case trend == "bullish" && score >= 70 && currentPrice <= buyHigh:
-		return "可等回踩买入区分批关注，不追高。"
-	case trend == "bullish" && score >= 70:
-		return "趋势偏强，等待更接近支撑位再介入。"
-	case trend == "neutral" && takeProfit > currentPrice:
-		return "区间震荡，优先等突破或回踩确认。"
-	case trend == "bearish" && currentPrice > stopLoss:
-		return "走势偏弱，先观察或减仓，不急于加仓。"
-	default:
-		return "先观察，等待更明确的价格信号。"
-	}
 }
 
 func summarizeNews(title, publishedAt string) string {
@@ -340,4 +377,33 @@ func maxInt(left, right int) int {
 		return left
 	}
 	return right
+}
+
+func snapshotToMap(snapshot planSnapshot) map[string]interface{} {
+	return map[string]interface{}{
+		"last_close":    snapshot.LastClose,
+		"ma10":          snapshot.MA10,
+		"ma20":          snapshot.MA20,
+		"ma60":          snapshot.MA60,
+		"support":       snapshot.Support,
+		"resistance":    snapshot.Resistance,
+		"score":         snapshot.Score,
+		"change_pct":    snapshot.ChangePct,
+		"volume_ratio":  snapshot.VolumeRatio,
+		"price_above20": snapshot.PriceAbove20,
+		"price_above60": snapshot.PriceAbove60,
+	}
+}
+
+func modeLabel(mode planMode) string {
+	switch mode {
+	case planModePullback:
+		return "回踩"
+	case planModeBreakout:
+		return "突破"
+	case planModeEvent:
+		return "事件"
+	default:
+		return "区间"
+	}
 }

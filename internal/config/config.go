@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
-	AppKey      string       `yaml:"app_key"`
-	AppSecret   string       `yaml:"app_secret"`
-	AccessToken string       `yaml:"access_token"`
-	Region      string       `yaml:"region"`
-	Server      ServerConfig `yaml:"server"`
-	Okx         *OkxConfig   `yaml:"okx"`
+	AppKey       string       `yaml:"app_key"`
+	AppSecret    string       `yaml:"app_secret"`
+	AccessToken  string       `yaml:"access_token"`
+	Region       string       `yaml:"region"`
+	TradingStyle string       `yaml:"trading_style"`
+	Server       ServerConfig `yaml:"server"`
+	Okx          *OkxConfig   `yaml:"okx"`
 
 	// Backward-compatible legacy server fields.
 	ServerHost string `yaml:"host"`
@@ -185,6 +186,10 @@ func Load(path string) (*Config, error) {
 			PreMarketTime:  "09:00",
 			PostMarketTime: "16:00",
 		}
+	}
+
+	if cfg.TradingStyle == "" {
+		cfg.TradingStyle = "swing"
 	}
 
 	// Set Signal Alert defaults

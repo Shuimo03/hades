@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/longportapp/openapi-go/quote"
+	"hades/internal/alerts"
 	"hades/internal/longbridge"
-	"hades/internal/planlevels"
 )
 
 func NewStockNewsTool(lb *longbridge.Client) func(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
@@ -103,7 +103,12 @@ func NewWatchlistPlanTool(lb *longbridge.Client) func(ctx context.Context, args 
 				return nil, fmt.Errorf("failed to get news for %s: %v", symbol, err)
 			}
 
-			resultItem := buildWatchlistPlanItem(symbol, weekly, daily, overallTrend, overallScore, signals, risks, newsItems, newsCount)
+			metrics, err := alerts.BuildAlertPlanMetrics(ctx, lb, symbol, longbridge.QuoteSessionScopeRegular)
+			if err != nil {
+				return nil, fmt.Errorf("failed to build plan for %s: %v", symbol, err)
+			}
+
+			resultItem := buildWatchlistPlanItem(symbol, weekly, daily, overallTrend, overallScore, signals, risks, newsItems, newsCount, metrics)
 			items = append(items, resultItem)
 		}
 
@@ -124,12 +129,7 @@ func NewWatchlistPlanTool(lb *longbridge.Client) func(ctx context.Context, args 
 	}
 }
 
-func buildWatchlistPlanItem(symbol string, weekly, daily trendSnapshot, overallTrend string, overallScore int, signals, risks []string, newsItems []*longbridge.StockNewsItem, newsCount int) map[string]interface{} {
-	buyZoneLow, buyZoneHigh := planlevels.BuyZone(overallTrend, daily.LastClose, daily.Support, weekly.Support)
-	stopLoss := planlevels.StopLoss(overallTrend, daily.LastClose, daily.Support, weekly.Support)
-	takeProfit := planlevels.TakeProfit(daily.LastClose, daily.Resistance, weekly.Resistance)
-	action := buildActionPlan(overallTrend, overallScore, daily.LastClose, buyZoneHigh, stopLoss, takeProfit)
-
+func buildWatchlistPlanItem(symbol string, weekly, daily trendSnapshot, overallTrend string, overallScore int, signals, risks []string, newsItems []*longbridge.StockNewsItem, newsCount int, metrics *alerts.AlertPlanMetrics) map[string]interface{} {
 	topNews := make([]map[string]interface{}, 0, min(newsCount, len(newsItems)))
 	newsSignals := make([]string, 0, newsCount)
 	for _, item := range newsItems {
@@ -146,17 +146,35 @@ func buildWatchlistPlanItem(symbol string, weekly, daily trendSnapshot, overallT
 	allSignals := dedupeStrings(append(signals, newsSignals...))
 
 	return map[string]interface{}{
-		"symbol":        symbol,
-		"trend":         overallTrend,
-		"score":         overallScore,
-		"action":        action,
-		"buy_zone_low":  buyZoneLow,
-		"buy_zone_high": buyZoneHigh,
-		"stop_loss":     stopLoss,
-		"take_profit":   takeProfit,
-		"signals":       allSignals,
-		"risks":         risks,
-		"suggestion":    buildWatchlistSuggestion(action, allSignals, risks),
+		"symbol":             symbol,
+		"trend":              overallTrend,
+		"score":              overallScore,
+		"mode":               metrics.Mode,
+		"mode_label":         metrics.ModeLabel,
+		"status":             metrics.Status,
+		"status_reason":      metrics.StatusReason,
+		"action":             metrics.Action,
+		"buy_zone_low":       metrics.BuyLow,
+		"buy_zone_high":      metrics.BuyHigh,
+		"stop_loss":          metrics.StopLoss,
+		"take_profit":        metrics.TakeProfit,
+		"take_profit_2":      metrics.TakeProfit2,
+		"rr":                 metrics.RR,
+		"rr_qualified":       metrics.RRQualified,
+		"breakout_confirm":   metrics.BreakoutConfirm,
+		"breakout_exit":      metrics.BreakoutExit,
+		"chase_limit":        metrics.ChaseLimit,
+		"volume_requirement": metrics.VolumeRequirement,
+		"event_risk":         metrics.EventRisk,
+		"event_notes":        metrics.EventNotes,
+		"signals":            allSignals,
+		"risks":              risks,
+		"conclusion":         metrics.Conclusion,
+		"entry_condition":    metrics.EntryCondition,
+		"invalidation":       metrics.InvalidationCondition,
+		"target_summary":     metrics.TargetSummary,
+		"suggestion":         metrics.Conclusion,
+		"position_context":   metrics.PositionContext,
 		"weekly": map[string]interface{}{
 			"trend":      weekly.Trend,
 			"score":      weekly.Score,
@@ -198,39 +216,6 @@ func summarizeNewsHeadline(item *longbridge.StockNewsItem) string {
 		}
 	}
 	return "资讯: " + title
-}
-
-func buildActionPlan(trend string, score int, lastClose, buyZoneHigh, stopLoss, takeProfit float64) string {
-	switch {
-	case trend == "bullish" && score >= 70 && lastClose <= buyZoneHigh:
-		return "watch_pullback_buy"
-	case trend == "bullish" && score >= 70:
-		return "wait_pullback"
-	case trend == "neutral" && takeProfit > lastClose:
-		return "watch_breakout"
-	case trend == "bearish" && lastClose > stopLoss:
-		return "reduce_or_wait"
-	default:
-		return "observe"
-	}
-}
-
-func buildWatchlistSuggestion(action string, signals, risks []string) string {
-	switch action {
-	case "watch_pullback_buy":
-		return "周日共振偏强，优先等待回踩买入区间，不追高。"
-	case "wait_pullback":
-		return "趋势仍偏强，但当前位置不够舒适，等回踩再考虑。"
-	case "watch_breakout":
-		return "当前更适合等突破确认或支撑企稳后再行动。"
-	case "reduce_or_wait":
-		return "走势偏弱，先以观察或减仓思路为主，避免盲目加仓。"
-	default:
-		if len(risks) > len(signals) {
-			return "信息面和走势都不够顺畅，先观察。"
-		}
-		return "维持观察，等待更明确的价格信号。"
-	}
 }
 
 func minNonZero(left, right float64) float64 {

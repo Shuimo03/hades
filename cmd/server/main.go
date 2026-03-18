@@ -217,10 +217,27 @@ func setupScheduledReviews(cfg *config.Config, lb *longbridge.Client, notifier a
 
 	reviewTimezone := cfg.ReviewSchedule.Timezone
 	dailyReviewTool := tools.NewDailyReviewTool(lb)
+	exceptionReviewTool := tools.NewExceptionReviewTool(lb)
 	weeklyReviewTool := tools.NewWeeklyReviewTool(lb)
 
 	if spec, err := weekdayRangeTimeSpec(cfg.ReviewSchedule.DailyReviewTime, "2-6"); err != nil {
 		log.Printf("[Review] Invalid daily review schedule %q: %v", cfg.ReviewSchedule.DailyReviewTime, err)
+	} else if isSwingTradingStyle(cfg) {
+		if err := sched.AddJob("exception_review", spec, func(ctx context.Context) {
+			result, err := exceptionReviewTool(ctx, map[string]interface{}{})
+			if err != nil {
+				log.Printf("[Review] Exception review failed: %v", err)
+				return
+			}
+			payload, _ := result["result"].(map[string]interface{})
+			hasExceptions, _ := payload["has_exceptions"].(bool)
+			if !hasExceptions {
+				return
+			}
+			notifier.Notify(ctx, "Swing Exception Review - 波段例外复盘", formatScheduledReviewMessage(result))
+		}); err != nil {
+			log.Printf("[Review] Failed to add exception review job: %v", err)
+		}
 	} else if err := sched.AddJob("daily_review", spec, func(ctx context.Context) {
 		result, err := dailyReviewTool(ctx, map[string]interface{}{
 			"timezone": reviewTimezone,
@@ -332,6 +349,10 @@ func preferredScheduleTimezone(cfg *config.Config) string {
 		return cfg.SignalAlert.Timezone
 	}
 	return "Asia/Shanghai"
+}
+
+func isSwingTradingStyle(cfg *config.Config) bool {
+	return strings.EqualFold(strings.TrimSpace(cfg.TradingStyle), "swing")
 }
 
 func newClockWindowChecker(timezone, startHHMM, endHHMM string) (func(time.Time) bool, error) {

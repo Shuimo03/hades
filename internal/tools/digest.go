@@ -96,13 +96,23 @@ func buildDigestActions(review map[string]interface{}, watchlistPlan interface{}
 			for _, item := range items {
 				action, _ := item["action"].(string)
 				symbol, _ := item["symbol"].(string)
+				modeLabel, _ := item["mode_label"].(string)
+				conclusion, _ := item["conclusion"].(string)
 				switch action {
 				case "watch_pullback_buy":
-					actions = append(actions, fmt.Sprintf("%s 可作为回踩买入候选，等待进入买入区后再执行。", symbol))
-				case "wait_pullback":
-					actions = append(actions, fmt.Sprintf("%s 趋势偏强，但先等更好的回踩位置。", symbol))
+					actions = append(actions, fmt.Sprintf("%s 当前为%s模式，等待回踩确认后再执行。", symbol, modeLabel))
+				case "watch_breakout":
+					actions = append(actions, fmt.Sprintf("%s 当前为%s模式，只接受确认突破，不预判追价。", symbol, modeLabel))
+				case "range_trade":
+					actions = append(actions, fmt.Sprintf("%s 当前为%s模式，只在下沿尝试，不追高。", symbol, modeLabel))
 				case "reduce_or_wait":
 					actions = append(actions, fmt.Sprintf("%s 当前走势偏弱，优先观察或降低参与度。", symbol))
+				case "event_wait":
+					actions = append(actions, fmt.Sprintf("%s 处于事件模式，机械挂单降权，先等事件后确认。", symbol))
+				default:
+					if conclusion != "" {
+						actions = append(actions, fmt.Sprintf("%s: %s", symbol, conclusion))
+					}
 				}
 				if len(actions) >= 6 {
 					break
@@ -129,15 +139,26 @@ func buildExecutionChecklist(review map[string]interface{}, watchlistPlan map[st
 				action, _ := item["action"].(string)
 				symbol, _ := item["symbol"].(string)
 				switch action {
-				case "watch_pullback_buy", "wait_pullback", "watch_breakout":
+				case "watch_pullback_buy", "watch_breakout", "range_trade", "event_wait":
 					buyCandidates = append(buyCandidates, map[string]interface{}{
-						"symbol":        symbol,
-						"action":        action,
-						"buy_zone_low":  item["buy_zone_low"],
-						"buy_zone_high": item["buy_zone_high"],
-						"stop_loss":     item["stop_loss"],
-						"take_profit":   item["take_profit"],
-						"suggestion":    item["suggestion"],
+						"symbol":           symbol,
+						"mode":             item["mode"],
+						"mode_label":       item["mode_label"],
+						"action":           action,
+						"buy_zone_low":     item["buy_zone_low"],
+						"buy_zone_high":    item["buy_zone_high"],
+						"stop_loss":        item["stop_loss"],
+						"take_profit":      item["take_profit"],
+						"take_profit_2":    item["take_profit_2"],
+						"breakout_confirm": item["breakout_confirm"],
+						"breakout_exit":    item["breakout_exit"],
+						"chase_limit":      item["chase_limit"],
+						"rr":               item["rr"],
+						"rr_qualified":     item["rr_qualified"],
+						"entry_condition":  item["entry_condition"],
+						"invalidation":     item["invalidation"],
+						"target_summary":   item["target_summary"],
+						"suggestion":       item["suggestion"],
 					})
 				}
 			}

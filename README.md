@@ -78,6 +78,7 @@ app_key: ""
 app_secret: ""
 access_token: ""
 region: "cn"
+trading_style: "swing"
 
 server:
   host: "0.0.0.0"
@@ -95,6 +96,12 @@ signal_alert:
   check_interval: 60
   session_scope: "extended"
   webhook_url: ""
+
+review_schedule:
+  enabled: true
+  timezone: "Asia/Shanghai"
+  daily_review_time: "07:30"   # swing: 例外复盘; intraday: 每日复盘
+  weekly_review_time: "08:30"
 
 execution_window:
   enabled: true
@@ -154,6 +161,7 @@ codex mcp add hades --url http://localhost:8080/mcp
 | `analyze_positions_trends` | `periods`, `lookback`, `trade_session` | 当前持仓走势体检，附带浮动盈亏 |
 | `analyze_portfolio_risk` | 无 | 分析当前组合集中度、弱势仓位和风险动作 |
 | `generate_daily_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成日复盘 |
+| `generate_exception_review` | 无 | 生成波段例外复盘，仅输出需要处理的持仓 |
 | `generate_weekly_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成周复盘 |
 | `generate_monthly_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成月复盘 |
 | `generate_yearly_review` | `start`, `end`, `timezone`, `periods`, `lookback`, `trade_session` | 生成年复盘 |
@@ -238,10 +246,15 @@ codex mcp add hades --url http://localhost:8080/mcp
 - 会附带当前持仓的趋势体检、持仓浮动盈亏、区间已实现盈亏和周内风险提示
 
 ### `generate_daily_review`
-- 默认统计当日 00:00 到当前时间
+- 默认统计最近 24 小时
 - `trade_session` 默认: `regular`
 - 输出结构与周复盘一致，适合盘后日报
 - 已实现盈亏基于 FIFO 和历史成交重建，当前不含手续费
+
+### `generate_exception_review`
+- 适合波段模式下做“例外复盘”，只关心需要处理的持仓
+- 会重点提示计划失效、接近失效位、接近 TP1、事件风险和浮盈/浮亏扩张
+- 当前无例外时不会生成冗长日报
 
 ### `generate_monthly_review`
 - 默认统计本月 1 日 00:00 到当前时间

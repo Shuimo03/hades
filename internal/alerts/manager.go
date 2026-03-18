@@ -398,7 +398,7 @@ func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q longbridg
 		return ""
 	}
 
-	metrics, err := buildAlertPlanMetrics(ctx, m.lb, alert.Symbol, m.QuoteScopeForAlert(alert))
+	metrics, err := BuildAlertPlanMetrics(ctx, m.lb, alert.Symbol, m.QuoteScopeForAlert(alert))
 	if err != nil {
 		return ""
 	}
@@ -407,9 +407,12 @@ func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q longbridg
 	sessionName := longbridge.QuoteSessionDisplayName(q.Session)
 	switch alert.Condition {
 	case AlertConditionInBuyZone:
-		if price >= metrics.BuyLow && price <= metrics.BuyHigh {
-			return fmt.Sprintf("[买入区提醒][%s] %s 进入关注买入区 %.2f - %.2f (当前: %.2f)",
-				sessionName, alert.Symbol, metrics.BuyLow, metrics.BuyHigh, price)
+		if (metrics.Mode == "pullback" || metrics.Mode == "range") &&
+			metrics.RRQualified &&
+			metrics.BuyHigh > 0 &&
+			price >= metrics.BuyLow && price <= metrics.BuyHigh {
+			return fmt.Sprintf("[计划提醒][%s] %s 进入%s计划区间 %.2f - %.2f (当前: %.2f)",
+				sessionName, alert.Symbol, metrics.ModeLabel, metrics.BuyLow, metrics.BuyHigh, price)
 		}
 	case AlertConditionNearTakeProfit:
 		bufferPct := alert.Threshold
@@ -418,22 +421,22 @@ func (m *Manager) checkTrendAlert(ctx context.Context, alert *Alert, q longbridg
 		}
 		triggerPrice := metrics.TakeProfit * (1 - bufferPct/100)
 		if metrics.IsHeld && price >= triggerPrice {
-			return fmt.Sprintf("[止盈提醒][%s] %s 接近计划止盈位 %.2f (当前: %.2f, 提前 %.2f%% 提醒)",
+			return fmt.Sprintf("[持仓提醒][%s] %s 接近 TP1 %.2f (当前: %.2f, 提前 %.2f%% 提醒)",
 				sessionName, alert.Symbol, metrics.TakeProfit, price, bufferPct)
 		}
 	case AlertConditionBelowStopLoss:
 		if metrics.IsHeld && price <= metrics.StopLoss {
-			return fmt.Sprintf("[止损提醒][%s] %s 跌破计划止损位 %.2f (当前: %.2f)",
+			return fmt.Sprintf("[失效提醒][%s] %s 跌破失效位 %.2f (当前: %.2f)",
 				sessionName, alert.Symbol, metrics.StopLoss, price)
 		}
 	case AlertConditionCrossUp:
-		if price > metrics.BuyHigh {
-			return fmt.Sprintf("[趋势提醒][%s] %s 向上脱离买入区，关注是否形成突破 (当前: %.2f)",
-				sessionName, alert.Symbol, price)
+		if metrics.Mode == "breakout" && price >= metrics.BreakoutConfirm {
+			return fmt.Sprintf("[突破提醒][%s] %s 接近突破确认价 %.2f (当前: %.2f, 追价上限: %.2f)",
+				sessionName, alert.Symbol, metrics.BreakoutConfirm, price, metrics.ChaseLimit)
 		}
 	case AlertConditionCrossDown:
 		if price < metrics.StopLoss {
-			return fmt.Sprintf("[趋势提醒][%s] %s 跌破计划止损位 %.2f (当前: %.2f)",
+			return fmt.Sprintf("[趋势提醒][%s] %s 跌破关键失效位 %.2f (当前: %.2f)",
 				sessionName, alert.Symbol, metrics.StopLoss, price)
 		}
 	}

@@ -144,7 +144,7 @@ func parseReviewRange(args map[string]interface{}, location *time.Location, peri
 func defaultPeriodStart(t time.Time, period reviewPeriod) time.Time {
 	switch period {
 	case reviewPeriodDaily:
-		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		return t.Add(-24 * time.Hour)
 	case reviewPeriodMonthly:
 		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
 	case reviewPeriodYearly:
@@ -409,7 +409,7 @@ func buildPeriodSummary(period reviewPeriod, operations map[string]interface{}, 
 func reviewPeriodLabel(period reviewPeriod) string {
 	switch period {
 	case reviewPeriodDaily:
-		return "本日"
+		return "近 24 小时"
 	case reviewPeriodMonthly:
 		return "本月"
 	case reviewPeriodYearly:
